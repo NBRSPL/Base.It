@@ -1,0 +1,114 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Base.It.App.ViewModels"
+             xmlns:cfg="using:Base.It.Core.Config"
+             x:Class="Base.It.App.Views.SyncView"
+             x:DataType="vm:SyncViewModel">
+
+    <DockPanel>
+        <!-- Slim indeterminate progress bar — docked top, collapsed when
+             IsBusy is false so it takes no vertical space. -->
+        <ProgressBar DockPanel.Dock="Top" Classes="pageLoader" IsVisible="{Binding IsBusy}"/>
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+
+        <!-- Row 0: source (env / db)  ·  object name  ·  actions  ·  source badge -->
+        <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Source" VerticalAlignment="Center"
+                           Margin="0,0,8,0" FontSize="12" Opacity="0.7"/>
+                <ComboBox Grid.Column="1" Width="110"
+                          ItemsSource="{Binding Environments}" SelectedItem="{Binding SourceEnv}"
+                          PlaceholderText="Environment"/>
+                <TextBlock Grid.Column="2" Text="/" VerticalAlignment="Center"
+                           Margin="6,0,6,0" Opacity="0.5"/>
+                <ComboBox Grid.Column="3" Width="150"
+                          ItemsSource="{Binding Databases}" SelectedItem="{Binding SourceDatabase}"
+                          PlaceholderText="Database"/>
+                <TextBox Grid.Column="4" Width="260" Margin="12,0,0,0"
+                         Text="{Binding ObjectName}" Watermark="dbo.usp_Something"/>
+                <Button  Grid.Column="5" Margin="8,0,0,0" MinWidth="72" Content="Backup"
+                         Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
+                         ToolTip.Tip="Capture source + every ticked target without altering anything."/>
+                <Button  Grid.Column="6" Margin="4,0,0,0" MinWidth="72" Content="Sync" Classes="accent"
+                         Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
+                <!-- flex spacer at col 7 -->
+                <Border  Grid.Column="8" Classes="badge"
+                         Background="{Binding SourceProfile.Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                         IsVisible="{Binding SourceProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
+                         VerticalAlignment="Center" Margin="12,0,0,0">
+                    <TextBlock Text="{Binding SourceProfile.Label}"/>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Row 1: target chips. Each target is a pill-shaped ToggleButton
+             — unchecked = outlined, checked = filled accent. No nested
+             border; chips sit directly in the toolbar row for a tight
+             compact look. -->
+        <Border Grid.Row="1" Classes="toolbar" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Targets" VerticalAlignment="Center"
+                           Margin="0,0,10,0" FontSize="12" Opacity="0.7"/>
+                <ScrollViewer Grid.Column="1"
+                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Targets}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:TargetPickVm">
+                                <ToggleButton Classes="chip"
+                                              Content="{Binding Label}"
+                                              IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- Row 2: DACPAC per-run opt-in. Hidden entirely when DACPAC
+             isn't configured in Settings — the checkbox is only useful
+             when the tree + branch-prefix are set up. -->
+        <Border Grid.Row="2" Classes="toolbar" Margin="0,0,0,6"
+                IsVisible="{Binding DacpacConfigured}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <CheckBox Grid.Column="0" Content="Write to DACPAC folder"
+                          IsChecked="{Binding StageAsDacpacBranch}"
+                          IsEnabled="{Binding !IsBusy}"
+                          ToolTip.Tip="After a successful sync, write the source definition to the configured DACPAC / SSDT folder. No git actions are taken — commit the changes yourself."/>
+                <TextBlock Grid.Column="2" FontSize="11" Opacity="0.55" VerticalAlignment="Center"
+                           Text="configured in Settings → DACPAC"/>
+            </Grid>
+        </Border>
+
+        <!-- Row 3: last-run info card -->
+        <Border Grid.Row="3" Classes="card">
+            <StackPanel Spacing="10">
+                <StackPanel>
+                    <TextBlock Classes="sectionTitle" Text="Last run"/>
+                    <StackPanel IsVisible="{Binding LastZipPath, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <TextBlock Text="Pair zip" Opacity="0.55" FontSize="11" Margin="0,0,0,3"/>
+                        <SelectableTextBlock Text="{Binding LastZipPath}" Classes="mono"/>
+                    </StackPanel>
+                    <TextBlock Opacity="0.5" FontSize="11"
+                               IsVisible="{Binding LastZipPath, Converter={x:Static StringConverters.IsNullOrEmpty}}"
+                               Text="No runs yet on this tab."/>
+                </StackPanel>
+                <StackPanel>
+                    <TextBlock Classes="sectionTitle" Text="Backup root"/>
+                    <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                               Text="Files live at {Backups}\{yyyy-MM-dd}\{Schema.Object}\{HHmmssfff}_{env}.sql. Nothing is ever overwritten."/>
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
+        <Border Grid.Row="4" Classes="pageStatus">
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+        </Border>
+    </Grid>
+    </DockPanel>
+</UserControl>

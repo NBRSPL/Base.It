@@ -1,0 +1,404 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Sharp-density professional dev-tool styling. Every brush is a
+         DynamicResource so Dark <-> Light flips swap the whole UI. -->
+
+    <!-- ============================================================
+         GLOBAL TEXT / PAGE BASELINE
+         ============================================================ -->
+    <Style Selector="Window">
+        <Setter Property="Background" Value="{DynamicResource App.WindowBgBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.TextPrimaryBrush}"/>
+    </Style>
+    <Style Selector="TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource App.TextPrimaryBrush}"/>
+    </Style>
+    <Style Selector="SelectableTextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource App.TextPrimaryBrush}"/>
+    </Style>
+
+    <!-- ============================================================
+         CARDS / PANELS
+         ============================================================ -->
+    <Style Selector="Border.card">
+        <Setter Property="Background" Value="{DynamicResource App.CardBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="12"/>
+    </Style>
+
+    <Style Selector="Border.cardElevated">
+        <Setter Property="Background" Value="{DynamicResource App.ElevatedBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="14"/>
+    </Style>
+
+    <!-- Settings section expander -->
+    <Style Selector="Expander.section">
+        <Setter Property="Background" Value="{DynamicResource App.CardBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Margin" Value="0,0,0,10"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+    </Style>
+
+    <!-- ============================================================
+         FORM ROW — tight vertical rhythm. Labels are mid-weight and
+         a hair smaller than the field they label so the eye rests on
+         the input, not the label.
+         ============================================================ -->
+    <Style Selector="Grid.formRow">
+        <Setter Property="Margin" Value="0,0,0,6"/>
+    </Style>
+    <Style Selector="Grid.formRow > TextBlock">
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.TextSecondaryBrush}"/>
+        <Setter Property="FontSize" Value="11"/>
+    </Style>
+    <!-- Inputs inside a form row: slightly shorter, tighter padding so
+         the whole pane doesn't feel like a sparse mattress. -->
+    <Style Selector="Grid.formRow TextBox">
+        <Setter Property="MinHeight" Value="28"/>
+        <Setter Property="Padding" Value="8,3"/>
+    </Style>
+    <Style Selector="Grid.formRow ComboBox">
+        <Setter Property="MinHeight" Value="28"/>
+    </Style>
+
+    <Style Selector="StackPanel.actionRow">
+        <Setter Property="Orientation" Value="Horizontal"/>
+        <Setter Property="Spacing" Value="8"/>
+        <Setter Property="Margin" Value="0,4,0,0"/>
+    </Style>
+
+    <!-- ============================================================
+         HELP BUTTON
+         ============================================================ -->
+    <Style Selector="Button.helpBtn">
+        <Setter Property="Width" Value="22"/>
+        <Setter Property="Height" Value="22"/>
+        <Setter Property="MinWidth" Value="22"/>
+        <Setter Property="MinHeight" Value="22"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="CornerRadius" Value="11"/>
+        <Setter Property="Background" Value="{DynamicResource App.ButtonBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.ButtonBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Content" Value="?"/>
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.TextPrimaryBrush}"/>
+        <Setter Property="Opacity" Value="0.75"/>
+        <Setter Property="ToolTip.Placement" Value="Bottom"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Button.helpBtn:pointerover">
+        <Setter Property="Opacity" Value="1.0"/>
+    </Style>
+
+    <!-- ============================================================
+         BADGES / TAGS / PILLS
+         ============================================================ -->
+    <Style Selector="Border.badge">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="7,2"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Border.badge > TextBlock">
+        <Setter Property="Foreground" Value="White"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style Selector="Border.tag">
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="7,2"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Background" Value="{DynamicResource App.TagBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.TagBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+    <Style Selector="Border.tag > TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource App.TagFgBrush}"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style Selector="Border.countPill">
+        <Setter Property="CornerRadius" Value="9"/>
+        <Setter Property="Padding" Value="7,1"/>
+        <Setter Property="MinWidth" Value="22"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+        <Setter Property="Background" Value="{DynamicResource App.TagBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.TagBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+    </Style>
+    <Style Selector="Border.countPill > TextBlock">
+        <Setter Property="Foreground" Value="{DynamicResource App.TagFgBrush}"/>
+        <Setter Property="FontSize" Value="10"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="HorizontalAlignment" Value="Center"/>
+    </Style>
+
+    <!-- ============================================================
+         STATUS BAR
+         ============================================================ -->
+    <Style Selector="Border.pageStatus">
+        <Setter Property="Padding" Value="12,6"/>
+        <Setter Property="BorderThickness" Value="0,1,0,0"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.DividerBrush}"/>
+    </Style>
+    <Style Selector="Border.pageStatus > TextBlock">
+        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.TextSecondaryBrush}"/>
+    </Style>
+
+    <!-- ============================================================
+         TOOLBAR
+         ============================================================ -->
+    <Style Selector="Border.toolbar">
+        <Setter Property="Padding" Value="10,7"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeBrush}"/>
+        <Setter Property="Background" Value="{DynamicResource App.ToolbarBgBrush}"/>
+    </Style>
+    <Style Selector="Border.toolbar TextBox, Border.toolbar ComboBox">
+        <Setter Property="MinHeight" Value="30"/>
+    </Style>
+    <Style Selector="Border.toolbar Button">
+        <Setter Property="MinHeight" Value="30"/>
+        <Setter Property="Padding" Value="12,2"/>
+    </Style>
+
+    <!-- ============================================================
+         TYPOGRAPHY
+         ============================================================ -->
+    <Style Selector="TextBlock.sectionTitle">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Margin" Value="0,0,0,6"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.TextSecondaryBrush}"/>
+    </Style>
+    <Style Selector="TextBlock.pageTitle">
+        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.TextPrimaryBrush}"/>
+    </Style>
+    <Style Selector="TextBlock.subtle">
+        <Setter Property="Foreground" Value="{DynamicResource App.TextMutedBrush}"/>
+        <Setter Property="FontSize" Value="11"/>
+    </Style>
+    <Style Selector="TextBlock.mono">
+        <Setter Property="FontFamily" Value="Cascadia Mono,Consolas,monospace"/>
+        <Setter Property="FontSize" Value="12"/>
+    </Style>
+    <Style Selector="TextBlock.errorText">
+        <Setter Property="Foreground" Value="{DynamicResource App.ErrorBrush}"/>
+        <Setter Property="FontSize" Value="11"/>
+    </Style>
+
+    <!-- ============================================================
+         BUTTONS (neutral, accent, danger)
+         ============================================================ -->
+    <Style Selector="Button:not(.accent):not(.danger):not(.helpBtn)">
+        <Setter Property="Background" Value="{DynamicResource App.ButtonBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.ButtonBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.TextPrimaryBrush}"/>
+        <Setter Property="CornerRadius" Value="6"/>
+    </Style>
+    <Style Selector="Button:not(.accent):not(.danger):not(.helpBtn):pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ButtonHoverBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeStrongBrush}"/>
+    </Style>
+    <Style Selector="Button:not(.accent):not(.danger):not(.helpBtn):pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ButtonPressedBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeStrongBrush}"/>
+    </Style>
+    <Style Selector="Button:not(.accent):not(.danger):not(.helpBtn):disabled /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ButtonDisabledBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.ButtonDisabledFgBrush}"/>
+    </Style>
+
+    <!-- Accent — primary call-to-action -->
+    <Style Selector="Button.accent">
+        <Setter Property="Background" Value="{DynamicResource App.AccentBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.AccentBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.OnAccentBrush}"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+    <Style Selector="Button.accent:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.AccentHoverBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.AccentHoverBrush}"/>
+        <Setter Property="TextBlock.Foreground" Value="{DynamicResource App.OnAccentBrush}"/>
+    </Style>
+    <Style Selector="Button.accent:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.AccentPressedBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.AccentPressedBrush}"/>
+    </Style>
+    <Style Selector="Button.accent:disabled /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ButtonDisabledBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.ButtonDisabledFgBrush}"/>
+    </Style>
+
+    <!-- Danger — destructive actions (remove, delete, force) -->
+    <Style Selector="Button.danger">
+        <Setter Property="Background" Value="{DynamicResource App.DangerBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.DangerBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.DangerFgBrush}"/>
+        <Setter Property="CornerRadius" Value="6"/>
+    </Style>
+    <Style Selector="Button.danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.DangerHoverBrush}"/>
+    </Style>
+
+    <!-- ============================================================
+         SECTION HEADER TOGGLE (used inside Border.card blocks for
+         collapsable sections — e.g. Watch pane object-type headers).
+         Pins background to Transparent in every state so Fluent's
+         default accent-fill doesn't paint the whole header purple.
+         A subtle hover overlay + chevron rotation + bottom divider
+         when checked give just enough affordance.
+         ============================================================ -->
+    <Style Selector="ToggleButton.sectionHeader">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.TextPrimaryBrush}"/>
+        <Setter Property="HorizontalAlignment" Value="Stretch"/>
+        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="Padding" Value="0"/>
+    </Style>
+    <Style Selector="ToggleButton.sectionHeader:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ElevatedBgBrush}"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+    </Style>
+    <Style Selector="ToggleButton.sectionHeader:checked /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+    </Style>
+    <Style Selector="ToggleButton.sectionHeader:checked:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ElevatedBgBrush}"/>
+    </Style>
+    <Style Selector="ToggleButton.sectionHeader:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ElevatedBgBrush}"/>
+    </Style>
+
+    <!-- Small round icon-only button used inline on tree rows (add / delete).
+         Ghost background, no border — only the glyph colour communicates
+         the action kind. .rowIconBtn sets the box; coloured variants add
+         .success / .danger. -->
+    <Style Selector="Button.rowIconBtn">
+        <Setter Property="Width" Value="24"/>
+        <Setter Property="Height" Value="24"/>
+        <Setter Property="MinWidth" Value="24"/>
+        <Setter Property="MinHeight" Value="24"/>
+        <Setter Property="Padding" Value="0"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderThickness" Value="0"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Button.rowIconBtn:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ElevatedBgBrush}"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+    </Style>
+    <Style Selector="Button.rowIconBtn:pressed /template/ ContentPresenter#PART_ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ButtonPressedBrush}"/>
+    </Style>
+
+    <!-- ============================================================
+         CHIP TOGGLE BUTTON (target picker)
+         ============================================================ -->
+    <Style Selector="ToggleButton.chip">
+        <Setter Property="MinHeight" Value="30"/>
+        <Setter Property="Padding" Value="12,2"/>
+        <Setter Property="CornerRadius" Value="15"/>
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="Margin" Value="2"/>
+        <Setter Property="Background" Value="{DynamicResource App.ButtonBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.ButtonBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.TextPrimaryBrush}"/>
+    </Style>
+    <Style Selector="ToggleButton.chip:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.ButtonHoverBrush}"/>
+    </Style>
+    <Style Selector="ToggleButton.chip:checked /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.AccentBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.AccentBrush}"/>
+        <Setter Property="TextBlock.Foreground" Value="{DynamicResource App.OnAccentBrush}"/>
+    </Style>
+    <Style Selector="ToggleButton.chip:checked:pointerover /template/ ContentPresenter">
+        <Setter Property="Background" Value="{DynamicResource App.AccentHoverBrush}"/>
+    </Style>
+
+    <!-- ============================================================
+         PROGRESS LOADER
+         ============================================================ -->
+    <Style Selector="ProgressBar.pageLoader">
+        <Setter Property="IsIndeterminate" Value="True"/>
+        <Setter Property="Height" Value="2"/>
+        <Setter Property="MinHeight" Value="2"/>
+        <Setter Property="Margin" Value="0,0,0,4"/>
+        <Setter Property="Foreground" Value="{DynamicResource App.AccentBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+    </Style>
+
+    <!-- ============================================================
+         FIELD VALIDATION
+         Apply .errorField on a TextBox when it has an error. The
+         message below the field uses .errorText (see Typography).
+         ============================================================ -->
+    <Style Selector="TextBox.errorField">
+        <Setter Property="BorderBrush" Value="{DynamicResource App.FieldErrorBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1.5"/>
+        <Setter Property="Background" Value="{DynamicResource App.FieldErrorBgBrush}"/>
+    </Style>
+    <Style Selector="TextBox.errorField:focus /template/ Border#PART_BorderElement">
+        <Setter Property="BorderBrush" Value="{DynamicResource App.FieldErrorBorderBrush}"/>
+    </Style>
+
+    <!-- ============================================================
+         TOAST
+         ============================================================ -->
+    <Style Selector="Border.toast">
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Padding" Value="14,10"/>
+        <Setter Property="MinWidth" Value="280"/>
+        <Setter Property="MaxWidth" Value="420"/>
+        <Setter Property="Margin" Value="0,6,0,0"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="BoxShadow" Value="0 6 20 0 #40000000"/>
+        <Setter Property="Background" Value="{DynamicResource App.ElevatedBgBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeStrongBrush}"/>
+    </Style>
+    <Style Selector="Border.toast.success">
+        <Setter Property="BorderBrush" Value="{DynamicResource App.SuccessBrush}"/>
+    </Style>
+    <Style Selector="Border.toast.error">
+        <Setter Property="BorderBrush" Value="{DynamicResource App.ErrorBrush}"/>
+    </Style>
+    <Style Selector="Border.toast.warning">
+        <Setter Property="BorderBrush" Value="{DynamicResource App.WarningBrush}"/>
+    </Style>
+    <Style Selector="Border.toast.info">
+        <Setter Property="BorderBrush" Value="{DynamicResource App.InfoBrush}"/>
+    </Style>
+
+</Styles>

@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "PowerShell(dotnet build \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\Base.It.App\\\\Base.It.App.csproj\" -c Debug -v minimal 2>&1)",
+      "PowerShell(dotnet test \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\Base.It.Core.Tests\\\\Base.It.Core.Tests.csproj\" -c Debug --verbosity quiet --nologo 2>&1)",
+      "PowerShell(& \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\publish.ps1\" 2>&1)",
+      "PowerShell(powershell.exe -ExecutionPolicy Bypass -File \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\publish.ps1\" 2>&1 | Select-Object -Last 40)",
+      "PowerShell($p = Start-Process \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\publish\\\\Base.It.exe\" -PassThru; Start-Sleep -Seconds 8; if \\(-not $p.HasExited\\) { Write-Host \"Process running — UI rendered OK \\(PID $\\($p.Id\\)\\)\"; $p.CloseMainWindow\\(\\) | Out-Null; Start-Sleep -Seconds 2; if \\(-not $p.HasExited\\) { Stop-Process -Id $p.Id -Force } } else { Write-Host \"Process exited with code $\\($p.ExitCode\\)\" })",
+      "PowerShell(powershell.exe -ExecutionPolicy Bypass -File \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\publish.ps1\" 2>&1 | Select-Object -Last 15)",
+      "PowerShell(dotnet build \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\Base.It.Core\\\\Base.It.Core.csproj\" -c Debug -v minimal --no-dependencies 2>&1)",
+      "PowerShell(dotnet build \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\Base.It.Core\\\\Base.It.Core.csproj\" -c Debug -v minimal --no-dependencies 2>&1 | Select-Object -Last 10; dotnet build \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\Base.It.App\\\\Base.It.App.csproj\" -c Debug -v minimal 2>&1 | Where-Object { $_ -match 'error|Error CS|AVLN' } | Select-Object -First 20)",
+      "PowerShell(powershell.exe -ExecutionPolicy Bypass -File \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\publish.ps1\" 2>&1 | Select-Object -Last 20)",
+      "PowerShell($env:GITHUB_TOKEN = \"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\"; powershell -ExecutionPolicy Bypass -File \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\release.ps1\" -Version 1.0.0 2>&1 | Select-Object -Last 60)",
+      "PowerShell($env:GITHUB_TOKEN = \"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\"; powershell -ExecutionPolicy Bypass -File \"D:\\\\nishant.bhatt\\\\DB_Sync\\\\Base.It\\\\release.ps1\" -Version 1.0.0 2>&1 | Select-Object -Last 80)",
+      "PowerShell(winget install --id Microsoft.DotNet.AspNetCore.9 --accept-source-agreements --accept-package-agreements --silent 2>&1)"
+    ]
+  }
+}

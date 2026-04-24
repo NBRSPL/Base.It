@@ -1,0 +1,252 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ResourceDictionary.ThemeDictionaries>
+
+        <!-- =========================================================
+             DARK — sharp, near-black base with high-contrast surfaces
+             and a cyan accent. Overrides the FluentAvaloniaUI tokens
+             that the app already binds to, plus adds App.* tokens for
+             things Fluent doesn't name directly.
+             ========================================================= -->
+        <ResourceDictionary x:Key="Dark">
+
+            <!-- Surfaces -->
+            <Color x:Key="App.WindowBgColor">#0C0E13</Color>
+            <Color x:Key="App.CardBgColor">#151823</Color>
+            <Color x:Key="App.ElevatedBgColor">#1B1F2B</Color>
+            <Color x:Key="App.ToolbarBgColor">#14171F</Color>
+            <Color x:Key="App.HoverOverlayColor">#FFFFFF</Color>
+
+            <!-- Strokes -->
+            <Color x:Key="App.StrokeColor">#262B38</Color>
+            <Color x:Key="App.StrokeStrongColor">#343A49</Color>
+            <Color x:Key="App.DividerColor">#1F2330</Color>
+
+            <!-- Text -->
+            <Color x:Key="App.TextPrimaryColor">#F1F3F6</Color>
+            <Color x:Key="App.TextSecondaryColor">#B4BAC6</Color>
+            <Color x:Key="App.TextMutedColor">#737A8A</Color>
+
+            <!-- Accent — cyan -->
+            <Color x:Key="App.AccentColor">#00C8DB</Color>
+            <Color x:Key="App.AccentHoverColor">#2FDAEA</Color>
+            <Color x:Key="App.AccentPressedColor">#00A3B4</Color>
+            <Color x:Key="App.OnAccentColor">#04121B</Color>
+
+            <!-- Semantic -->
+            <Color x:Key="App.SuccessColor">#22C55E</Color>
+            <Color x:Key="App.WarningColor">#F5A524</Color>
+            <Color x:Key="App.ErrorColor">#F04747</Color>
+            <Color x:Key="App.InfoColor">#3B82F6</Color>
+
+            <!-- Buttons (neutral) -->
+            <Color x:Key="App.ButtonBgColor">#232834</Color>
+            <Color x:Key="App.ButtonHoverColor">#2D3342</Color>
+            <Color x:Key="App.ButtonPressedColor">#191D27</Color>
+            <Color x:Key="App.ButtonBorderColor">#3A414F</Color>
+            <Color x:Key="App.ButtonDisabledBgColor">#1A1E27</Color>
+            <Color x:Key="App.ButtonDisabledFgColor">#55596A</Color>
+
+            <!-- Buttons (destructive) -->
+            <Color x:Key="App.DangerBgColor">#3A1E23</Color>
+            <Color x:Key="App.DangerHoverColor">#4D2429</Color>
+            <Color x:Key="App.DangerBorderColor">#6B2F36</Color>
+            <Color x:Key="App.DangerFgColor">#FF8A8A</Color>
+
+            <!-- Chips / tags -->
+            <Color x:Key="App.TagBgColor">#212634</Color>
+            <Color x:Key="App.TagBorderColor">#323848</Color>
+            <Color x:Key="App.TagFgColor">#C4CAD6</Color>
+
+            <!-- Validation -->
+            <Color x:Key="App.FieldErrorBorderColor">#F04747</Color>
+            <Color x:Key="App.FieldErrorBgColor">#2A1418</Color>
+
+            <!-- ==== Brushes (bind these from XAML) ==== -->
+            <SolidColorBrush x:Key="App.WindowBgBrush" Color="{StaticResource App.WindowBgColor}"/>
+            <SolidColorBrush x:Key="App.CardBgBrush" Color="{StaticResource App.CardBgColor}"/>
+            <SolidColorBrush x:Key="App.ElevatedBgBrush" Color="{StaticResource App.ElevatedBgColor}"/>
+            <SolidColorBrush x:Key="App.ToolbarBgBrush" Color="{StaticResource App.ToolbarBgColor}"/>
+
+            <SolidColorBrush x:Key="App.StrokeBrush" Color="{StaticResource App.StrokeColor}"/>
+            <SolidColorBrush x:Key="App.StrokeStrongBrush" Color="{StaticResource App.StrokeStrongColor}"/>
+            <SolidColorBrush x:Key="App.DividerBrush" Color="{StaticResource App.DividerColor}"/>
+
+            <SolidColorBrush x:Key="App.TextPrimaryBrush" Color="{StaticResource App.TextPrimaryColor}"/>
+            <SolidColorBrush x:Key="App.TextSecondaryBrush" Color="{StaticResource App.TextSecondaryColor}"/>
+            <SolidColorBrush x:Key="App.TextMutedBrush" Color="{StaticResource App.TextMutedColor}"/>
+
+            <SolidColorBrush x:Key="App.AccentBrush" Color="{StaticResource App.AccentColor}"/>
+            <SolidColorBrush x:Key="App.AccentHoverBrush" Color="{StaticResource App.AccentHoverColor}"/>
+            <SolidColorBrush x:Key="App.AccentPressedBrush" Color="{StaticResource App.AccentPressedColor}"/>
+            <SolidColorBrush x:Key="App.OnAccentBrush" Color="{StaticResource App.OnAccentColor}"/>
+
+            <SolidColorBrush x:Key="App.SuccessBrush" Color="{StaticResource App.SuccessColor}"/>
+            <SolidColorBrush x:Key="App.WarningBrush" Color="{StaticResource App.WarningColor}"/>
+            <SolidColorBrush x:Key="App.ErrorBrush" Color="{StaticResource App.ErrorColor}"/>
+            <SolidColorBrush x:Key="App.InfoBrush" Color="{StaticResource App.InfoColor}"/>
+
+            <SolidColorBrush x:Key="App.ButtonBgBrush" Color="{StaticResource App.ButtonBgColor}"/>
+            <SolidColorBrush x:Key="App.ButtonHoverBrush" Color="{StaticResource App.ButtonHoverColor}"/>
+            <SolidColorBrush x:Key="App.ButtonPressedBrush" Color="{StaticResource App.ButtonPressedColor}"/>
+            <SolidColorBrush x:Key="App.ButtonBorderBrush" Color="{StaticResource App.ButtonBorderColor}"/>
+            <SolidColorBrush x:Key="App.ButtonDisabledBgBrush" Color="{StaticResource App.ButtonDisabledBgColor}"/>
+            <SolidColorBrush x:Key="App.ButtonDisabledFgBrush" Color="{StaticResource App.ButtonDisabledFgColor}"/>
+
+            <SolidColorBrush x:Key="App.DangerBgBrush" Color="{StaticResource App.DangerBgColor}"/>
+            <SolidColorBrush x:Key="App.DangerHoverBrush" Color="{StaticResource App.DangerHoverColor}"/>
+            <SolidColorBrush x:Key="App.DangerBorderBrush" Color="{StaticResource App.DangerBorderColor}"/>
+            <SolidColorBrush x:Key="App.DangerFgBrush" Color="{StaticResource App.DangerFgColor}"/>
+
+            <SolidColorBrush x:Key="App.TagBgBrush" Color="{StaticResource App.TagBgColor}"/>
+            <SolidColorBrush x:Key="App.TagBorderBrush" Color="{StaticResource App.TagBorderColor}"/>
+            <SolidColorBrush x:Key="App.TagFgBrush" Color="{StaticResource App.TagFgColor}"/>
+
+            <SolidColorBrush x:Key="App.FieldErrorBorderBrush" Color="{StaticResource App.FieldErrorBorderColor}"/>
+            <SolidColorBrush x:Key="App.FieldErrorBgBrush" Color="{StaticResource App.FieldErrorBgColor}"/>
+
+            <!-- Override FluentAvalonia tokens so existing bindings pick up the sharper palette -->
+            <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>
+            <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="{StaticResource App.ButtonBgColor}"/>
+            <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="{StaticResource App.StrokeColor}"/>
+            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{StaticResource App.AccentColor}"/>
+            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{StaticResource App.AccentHoverColor}"/>
+            <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="{StaticResource App.AccentPressedColor}"/>
+            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="{StaticResource App.OnAccentColor}"/>
+            <SolidColorBrush x:Key="SystemFillColorSuccessBrush" Color="{StaticResource App.SuccessColor}"/>
+            <SolidColorBrush x:Key="SystemFillColorCriticalBrush" Color="{StaticResource App.ErrorColor}"/>
+            <SolidColorBrush x:Key="SystemFillColorCautionBrush" Color="{StaticResource App.WarningColor}"/>
+            <!-- Text brushes: FluentAvalonia's default text tokens. Many
+                 controls (NavigationView items, ComboBox text, watermark)
+                 resolve their foreground from these rather than the window
+                 Foreground, so we MUST override them per-theme or light
+                 mode ends up with near-white text on a near-white surface. -->
+            <SolidColorBrush x:Key="TextFillColorPrimaryBrush"   Color="{StaticResource App.TextPrimaryColor}"/>
+            <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="{StaticResource App.TextSecondaryColor}"/>
+            <SolidColorBrush x:Key="TextFillColorTertiaryBrush"  Color="{StaticResource App.TextMutedColor}"/>
+            <SolidColorBrush x:Key="TextFillColorDisabledBrush"  Color="{StaticResource App.ButtonDisabledFgColor}"/>
+            <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="{StaticResource App.TextMutedColor}"/>
+        </ResourceDictionary>
+
+        <!-- =========================================================
+             LIGHT — crisp white surfaces, high-contrast text, deeper
+             cyan accent that reads well on white.
+             ========================================================= -->
+        <ResourceDictionary x:Key="Light">
+
+            <!-- Surfaces -->
+            <Color x:Key="App.WindowBgColor">#F6F7F9</Color>
+            <Color x:Key="App.CardBgColor">#FFFFFF</Color>
+            <Color x:Key="App.ElevatedBgColor">#F2F4F7</Color>
+            <Color x:Key="App.ToolbarBgColor">#FFFFFF</Color>
+            <Color x:Key="App.HoverOverlayColor">#000000</Color>
+
+            <!-- Strokes -->
+            <Color x:Key="App.StrokeColor">#E3E6EC</Color>
+            <Color x:Key="App.StrokeStrongColor">#C8CDD6</Color>
+            <Color x:Key="App.DividerColor">#EAECF0</Color>
+
+            <!-- Text -->
+            <Color x:Key="App.TextPrimaryColor">#0E121A</Color>
+            <Color x:Key="App.TextSecondaryColor">#4A5362</Color>
+            <Color x:Key="App.TextMutedColor">#8189A0</Color>
+
+            <!-- Accent — deeper cyan (AA contrast on white) -->
+            <Color x:Key="App.AccentColor">#007A89</Color>
+            <Color x:Key="App.AccentHoverColor">#008FA1</Color>
+            <Color x:Key="App.AccentPressedColor">#005A66</Color>
+            <Color x:Key="App.OnAccentColor">#FFFFFF</Color>
+
+            <!-- Semantic -->
+            <Color x:Key="App.SuccessColor">#15803D</Color>
+            <Color x:Key="App.WarningColor">#B45309</Color>
+            <Color x:Key="App.ErrorColor">#C9292E</Color>
+            <Color x:Key="App.InfoColor">#1D4ED8</Color>
+
+            <!-- Buttons (neutral) -->
+            <Color x:Key="App.ButtonBgColor">#F2F4F7</Color>
+            <Color x:Key="App.ButtonHoverColor">#E4E8EF</Color>
+            <Color x:Key="App.ButtonPressedColor">#D5DAE3</Color>
+            <Color x:Key="App.ButtonBorderColor">#D0D5DD</Color>
+            <Color x:Key="App.ButtonDisabledBgColor">#F4F5F7</Color>
+            <Color x:Key="App.ButtonDisabledFgColor">#A0A4AE</Color>
+
+            <!-- Buttons (destructive) -->
+            <Color x:Key="App.DangerBgColor">#FEF2F2</Color>
+            <Color x:Key="App.DangerHoverColor">#FEE4E4</Color>
+            <Color x:Key="App.DangerBorderColor">#F8B4B4</Color>
+            <Color x:Key="App.DangerFgColor">#B91C1C</Color>
+
+            <!-- Chips / tags -->
+            <Color x:Key="App.TagBgColor">#EEF0F4</Color>
+            <Color x:Key="App.TagBorderColor">#D9DDE5</Color>
+            <Color x:Key="App.TagFgColor">#3D4351</Color>
+
+            <!-- Validation -->
+            <Color x:Key="App.FieldErrorBorderColor">#C9292E</Color>
+            <Color x:Key="App.FieldErrorBgColor">#FDECEC</Color>
+
+            <!-- ==== Brushes ==== -->
+            <SolidColorBrush x:Key="App.WindowBgBrush" Color="{StaticResource App.WindowBgColor}"/>
+            <SolidColorBrush x:Key="App.CardBgBrush" Color="{StaticResource App.CardBgColor}"/>
+            <SolidColorBrush x:Key="App.ElevatedBgBrush" Color="{StaticResource App.ElevatedBgColor}"/>
+            <SolidColorBrush x:Key="App.ToolbarBgBrush" Color="{StaticResource App.ToolbarBgColor}"/>
+
+            <SolidColorBrush x:Key="App.StrokeBrush" Color="{StaticResource App.StrokeColor}"/>
+            <SolidColorBrush x:Key="App.StrokeStrongBrush" Color="{StaticResource App.StrokeStrongColor}"/>
+            <SolidColorBrush x:Key="App.DividerBrush" Color="{StaticResource App.DividerColor}"/>
+
+            <SolidColorBrush x:Key="App.TextPrimaryBrush" Color="{StaticResource App.TextPrimaryColor}"/>
+            <SolidColorBrush x:Key="App.TextSecondaryBrush" Color="{StaticResource App.TextSecondaryColor}"/>
+            <SolidColorBrush x:Key="App.TextMutedBrush" Color="{StaticResource App.TextMutedColor}"/>
+
+            <SolidColorBrush x:Key="App.AccentBrush" Color="{StaticResource App.AccentColor}"/>
+            <SolidColorBrush x:Key="App.AccentHoverBrush" Color="{StaticResource App.AccentHoverColor}"/>
+            <SolidColorBrush x:Key="App.AccentPressedBrush" Color="{StaticResource App.AccentPressedColor}"/>
+            <SolidColorBrush x:Key="App.OnAccentBrush" Color="{StaticResource App.OnAccentColor}"/>
+
+            <SolidColorBrush x:Key="App.SuccessBrush" Color="{StaticResource App.SuccessColor}"/>
+            <SolidColorBrush x:Key="App.WarningBrush" Color="{StaticResource App.WarningColor}"/>
+            <SolidColorBrush x:Key="App.ErrorBrush" Color="{StaticResource App.ErrorColor}"/>
+            <SolidColorBrush x:Key="App.InfoBrush" Color="{StaticResource App.InfoColor}"/>
+
+            <SolidColorBrush x:Key="App.ButtonBgBrush" Color="{StaticResource App.ButtonBgColor}"/>
+            <SolidColorBrush x:Key="App.ButtonHoverBrush" Color="{StaticResource App.ButtonHoverColor}"/>
+            <SolidColorBrush x:Key="App.ButtonPressedBrush" Color="{StaticResource App.ButtonPressedColor}"/>
+            <SolidColorBrush x:Key="App.ButtonBorderBrush" Color="{StaticResource App.ButtonBorderColor}"/>
+            <SolidColorBrush x:Key="App.ButtonDisabledBgBrush" Color="{StaticResource App.ButtonDisabledBgColor}"/>
+            <SolidColorBrush x:Key="App.ButtonDisabledFgBrush" Color="{StaticResource App.ButtonDisabledFgColor}"/>
+
+            <SolidColorBrush x:Key="App.DangerBgBrush" Color="{StaticResource App.DangerBgColor}"/>
+            <SolidColorBrush x:Key="App.DangerHoverBrush" Color="{StaticResource App.DangerHoverColor}"/>
+            <SolidColorBrush x:Key="App.DangerBorderBrush" Color="{StaticResource App.DangerBorderColor}"/>
+            <SolidColorBrush x:Key="App.DangerFgBrush" Color="{StaticResource App.DangerFgColor}"/>
+
+            <SolidColorBrush x:Key="App.TagBgBrush" Color="{StaticResource App.TagBgColor}"/>
+            <SolidColorBrush x:Key="App.TagBorderBrush" Color="{StaticResource App.TagBorderColor}"/>
+            <SolidColorBrush x:Key="App.TagFgBrush" Color="{StaticResource App.TagFgColor}"/>
+
+            <SolidColorBrush x:Key="App.FieldErrorBorderBrush" Color="{StaticResource App.FieldErrorBorderColor}"/>
+            <SolidColorBrush x:Key="App.FieldErrorBgBrush" Color="{StaticResource App.FieldErrorBgColor}"/>
+
+            <!-- Override FluentAvalonia tokens -->
+            <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>
+            <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="{StaticResource App.ButtonBgColor}"/>
+            <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="{StaticResource App.StrokeColor}"/>
+            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="{StaticResource App.AccentColor}"/>
+            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="{StaticResource App.AccentHoverColor}"/>
+            <SolidColorBrush x:Key="AccentFillColorTertiaryBrush" Color="{StaticResource App.AccentPressedColor}"/>
+            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="{StaticResource App.OnAccentColor}"/>
+            <SolidColorBrush x:Key="SystemFillColorSuccessBrush" Color="{StaticResource App.SuccessColor}"/>
+            <SolidColorBrush x:Key="SystemFillColorCriticalBrush" Color="{StaticResource App.ErrorColor}"/>
+            <SolidColorBrush x:Key="SystemFillColorCautionBrush" Color="{StaticResource App.WarningColor}"/>
+            <SolidColorBrush x:Key="TextFillColorPrimaryBrush"   Color="{StaticResource App.TextPrimaryColor}"/>
+            <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="{StaticResource App.TextSecondaryColor}"/>
+            <SolidColorBrush x:Key="TextFillColorTertiaryBrush"  Color="{StaticResource App.TextMutedColor}"/>
+            <SolidColorBrush x:Key="TextFillColorDisabledBrush"  Color="{StaticResource App.ButtonDisabledFgColor}"/>
+            <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="{StaticResource App.TextMutedColor}"/>
+        </ResourceDictionary>
+
+    </ResourceDictionary.ThemeDictionaries>
+</ResourceDictionary>

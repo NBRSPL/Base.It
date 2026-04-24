@@ -1,0 +1,55 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Base.It.App.ViewModels"
+             xmlns:v="using:Base.It.App.Views"
+             x:Class="Base.It.App.Views.CompareView"
+             x:DataType="vm:CompareViewModel">
+
+    <Grid RowDefinitions="*,Auto">
+
+        <!-- Empty state -->
+        <StackPanel Grid.Row="0" VerticalAlignment="Center" HorizontalAlignment="Center"
+                    IsVisible="{Binding ActiveTab, Converter={x:Static ObjectConverters.IsNull}}"
+                    Spacing="6">
+            <TextBlock Text="&#xE721;"
+                       FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                       FontSize="28" Opacity="0.4" HorizontalAlignment="Center"/>
+            <TextBlock Text="No comparison open." Opacity="0.6" FontSize="12"
+                       HorizontalAlignment="Center"/>
+            <TextBlock Text="Use the Fetch bar above to open a comparison."
+                       Opacity="0.4" FontSize="11" HorizontalAlignment="Center"/>
+        </StackPanel>
+
+        <!-- Tabs -->
+        <TabControl Grid.Row="0" ItemsSource="{Binding Tabs}"
+                    SelectedItem="{Binding ActiveTab}"
+                    IsVisible="{Binding ActiveTab, Converter={x:Static ObjectConverters.IsNotNull}}"
+                    Padding="0" Margin="0">
+            <TabControl.ItemTemplate>
+                <DataTemplate DataType="vm:CompareTabViewModel">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding Label}" FontSize="12"
+                                   ToolTip.Tip="{Binding ObjectName}"/>
+                        <Button Content="&#xE10A;"
+                                FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                FontSize="10"
+                                Width="18" Height="18" Padding="0"
+                                Background="Transparent" BorderThickness="0"
+                                Command="{Binding $parent[TabControl].((vm:CompareViewModel)DataContext).CloseTabCommand}"
+                                CommandParameter="{Binding}"
+                                ToolTip.Tip="Close tab"/>
+                    </StackPanel>
+                </DataTemplate>
+            </TabControl.ItemTemplate>
+            <TabControl.ContentTemplate>
+                <DataTemplate DataType="vm:CompareTabViewModel">
+                    <v:CompareTabView/>
+                </DataTemplate>
+            </TabControl.ContentTemplate>
+        </TabControl>
+
+        <Border Grid.Row="1" Classes="pageStatus">
+            <TextBlock Text="{Binding ActiveTab.Status, FallbackValue='Idle.'}"/>
+        </Border>
+    </Grid>
+</UserControl>

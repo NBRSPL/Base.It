@@ -1,0 +1,116 @@
+<uiw:AppWindow xmlns="https://github.com/avaloniaui"
+               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+               xmlns:vm="using:Base.It.App.ViewModels"
+               xmlns:v="using:Base.It.App.Views"
+               xmlns:cfg="using:Base.It.Core.Config"
+               xmlns:ui="using:FluentAvalonia.UI.Controls"
+               xmlns:uiw="using:FluentAvalonia.UI.Windowing"
+               x:Class="Base.It.App.MainWindow"
+               x:DataType="vm:MainWindowViewModel"
+               Width="1240" Height="760"
+               MinWidth="960" MinHeight="560"
+               Title="Base.it"
+               WindowStartupLocation="CenterScreen"
+               Background="{DynamicResource App.WindowBgBrush}">
+
+    <Panel>
+        <ui:NavigationView x:Name="Nav"
+                           PaneDisplayMode="Left"
+                           IsSettingsVisible="False"
+                           IsBackButtonVisible="False"
+                           IsPaneToggleButtonVisible="True"
+                           OpenPaneLength="210">
+
+            <ui:NavigationView.MenuItems>
+                <ui:NavigationViewItem Content="Home"    Tag="Home"    IconSource="Home"/>
+                <ui:NavigationViewItem Content="Compare" Tag="Compare" IconSource="AllApps"/>
+                <ui:NavigationViewItem Content="Sync"    Tag="Sync"    IconSource="Sync"/>
+                <ui:NavigationViewItem Content="Batch"   Tag="Batch"   IconSource="List"/>
+                <ui:NavigationViewItem Content="Query"   Tag="Query"   IconSource="Find"/>
+                <ui:NavigationViewItem Content="Watch"   Tag="Watch"   IconSource="View"/>
+            </ui:NavigationView.MenuItems>
+
+            <ui:NavigationView.FooterMenuItems>
+                <ui:NavigationViewItem Content="Settings" Tag="Settings" IconSource="Settings"/>
+            </ui:NavigationView.FooterMenuItems>
+
+            <!-- Pane footer: theme toggle. Aligned LEFT with the same
+                 horizontal indent Fluent uses for its nav item icons, so
+                 it visually belongs to the stack instead of floating in
+                 the middle of the pane. The icon itself is 40×40 (same
+                 footprint as a nav item's icon area) with no background
+                 until hovered — it still reads as an icon button, not
+                 a full-width tab. PaneFooter renders just above the
+                 FooterMenuItems (Settings), keeping the toggle adjacent
+                 to Settings without fake-looking like a nav entry. -->
+            <ui:NavigationView.PaneFooter>
+                <!-- Theme toggle. Stretches to match the nav item width when
+                     the pane is expanded (showing "Theme" label next to the
+                     icon), collapses to a pure 40×40 icon button when the
+                     pane is collapsed. Icon stays in the same 40-wide gutter
+                     so it aligns with nav item icons above. -->
+                <Border HorizontalAlignment="Stretch" Padding="4,0,4,2">
+                    <Button x:Name="ThemeToggleBtn"
+                            HorizontalAlignment="Stretch"
+                            HorizontalContentAlignment="Left"
+                            VerticalContentAlignment="Center"
+                            MinHeight="40"
+                            Padding="0"
+                            CornerRadius="4"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            ToolTip.Tip="Toggle Dark / Light theme"
+                            Click="OnToggleTheme">
+                        <Grid ColumnDefinitions="40,*">
+                            <TextBlock x:Name="ThemeGlyph" Grid.Column="0"
+                                       Text="☾" FontSize="16"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                            <TextBlock x:Name="ThemeLabel" Grid.Column="1"
+                                       Text="Theme" FontSize="13"
+                                       VerticalAlignment="Center"
+                                       IsVisible="{Binding IsPaneOpen, ElementName=Nav}"
+                                       Foreground="{DynamicResource App.TextPrimaryBrush}"/>
+                        </Grid>
+                    </Button>
+                </Border>
+            </ui:NavigationView.PaneFooter>
+
+            <Grid RowDefinitions="Auto,*" Margin="12,40,12,12">
+
+                <!-- Top bar: fetch dock on the left, active-group picker on the
+                     right (theme toggle is in the nav pane footer now). -->
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,140" Margin="0,0,0,10">
+                    <v:FetchDockView Grid.Column="0" DataContext="{Binding FetchDock}"/>
+
+                    <Border x:Name="GroupSelector" Grid.Column="1" Classes="toolbar" Margin="0,0,8,0"
+                            VerticalAlignment="Center">
+                        <Grid ColumnDefinitions="Auto,Auto,Auto">
+                            <TextBlock Grid.Column="0" Text="Group"
+                                       VerticalAlignment="Center" FontSize="12"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"
+                                       Margin="0,0,8,0"/>
+                            <ComboBox Grid.Column="1" Width="180"
+                                      ItemsSource="{Binding ConnectionGroups}"
+                                      SelectedItem="{Binding ActiveConnectionGroup}"
+                                      PlaceholderText="All connections">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate DataType="cfg:ConnectionGroup">
+                                        <TextBlock Text="{Binding Name}"/>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Button Grid.Column="2" Margin="4,0,0,0" Content="Clear"
+                                    Command="{Binding ClearActiveGroupCommand}"
+                                    ToolTip.Tip="Show every configured connection (no group filter)"/>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <ui:Frame x:Name="Host" Grid.Row="1" Padding="0"/>
+            </Grid>
+        </ui:NavigationView>
+
+        <v:ToastHost x:Name="Toasts" DataContext="{Binding Services.Toasts}"/>
+    </Panel>
+</uiw:AppWindow>

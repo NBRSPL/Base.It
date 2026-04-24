@@ -1,0 +1,48 @@
+# Build outputs
+bin/
+obj/
+publish/
+Releases/
+*.dll
+*.pdb
+*.exe
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# IDE
+*.code-workspace
+
+# NuGet
+*.nupkg
+*.snupkg
+
+# Test coverage
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# macOS
+.DS_Store
+# Windows
+Thumbs.db
+Desktop.ini
+
+# User-specific local data — the app writes these under %LOCALAPPDATA%,
+# NOT into the repo. Still, belt-and-braces in case anyone mis-places
+# them next to the project.
+connections.bin
+watchgroups.json
+connectiongroups.json
+dacpac.json
+Backups/
+Logs/
+
+# Dotnet tool manifest local workspaces
+.config/dotnet-tools.json.local

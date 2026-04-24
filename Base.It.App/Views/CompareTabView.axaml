@@ -1,0 +1,36 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Base.It.App.ViewModels"
+             xmlns:cfg="using:Base.It.Core.Config"
+             x:Class="Base.It.App.Views.CompareTabView"
+             x:DataType="vm:CompareTabViewModel">
+
+    <Grid RowDefinitions="Auto,*">
+        <!-- Thin inline strip with involved badges + restore -->
+        <Border Grid.Row="0" Padding="6,4" Margin="0,0,0,4">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <ItemsControl Grid.Column="0" ItemsSource="{Binding InvolvedConnections}">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="4"/></ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="cfg:EnvironmentConfig">
+                            <Border Classes="badge"
+                                    Background="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}">
+                                <TextBlock Text="{Binding Label}"/>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <Button Grid.Column="2" Content="Restore"
+                        IsVisible="{Binding ExpandedPane, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        Command="{Binding RestoreCommand}"/>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="1" Classes="card" Padding="2">
+            <Grid x:Name="PanesHost"/>
+        </Border>
+    </Grid>
+</UserControl>

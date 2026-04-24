@@ -1,0 +1,51 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Base.It.App.ViewModels"
+             x:Class="Base.It.App.Views.FetchDockView"
+             x:DataType="vm:FetchDockViewModel">
+
+    <!-- Collapse/pin button is on the LEFT — never near the window caption. -->
+    <Grid IsVisible="{Binding IsVisible}">
+
+        <!-- Expanded bar -->
+        <Border Classes="toolbar" IsVisible="{Binding IsExpanded}">
+            <Grid ColumnDefinitions="Auto,Auto,*,160,Auto">
+                <Button Grid.Column="0"
+                        Width="28" Height="28" Padding="0"
+                        Content="&#xE840;"
+                        FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                        FontSize="13"
+                        Command="{Binding CollapseCommand}"
+                        ToolTip.Tip="Unpin (collapse the fetch bar)"/>
+                <TextBlock Grid.Column="1" Text="Fetch" Opacity="0.6" FontSize="11"
+                           VerticalAlignment="Center" Margin="8,0,8,0"/>
+                <TextBox  Grid.Column="2" Text="{Binding ObjectName}"
+                          Watermark="schema.object (e.g. dbo.usp_Something)"
+                          MinHeight="28"/>
+                <ComboBox Grid.Column="3" Margin="6,0,0,0"
+                          ItemsSource="{Binding Databases}"
+                          SelectedItem="{Binding SelectedDatabase}"
+                          PlaceholderText="Database"
+                          HorizontalAlignment="Stretch"/>
+                <Button   Grid.Column="4" Margin="6,0,0,0" Content="Fetch"
+                          Classes="accent"
+                          Command="{Binding FetchCommand}"
+                          IsEnabled="{Binding !IsBusy}"/>
+            </Grid>
+        </Border>
+
+        <!-- Collapsed: tiny chip on the left -->
+        <Button HorizontalAlignment="Left" VerticalAlignment="Center"
+                IsVisible="{Binding !IsExpanded}"
+                Command="{Binding ExpandCommand}"
+                Padding="10,4" MinHeight="26"
+                ToolTip.Tip="Open the fetch bar">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <TextBlock Text="&#xE721;"
+                           FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                           FontSize="12"/>
+                <TextBlock Text="Fetch" FontSize="12"/>
+            </StackPanel>
+        </Button>
+    </Grid>
+</UserControl>

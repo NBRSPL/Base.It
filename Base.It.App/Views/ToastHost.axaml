@@ -1,0 +1,63 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:svc="using:Base.It.App.Services"
+             x:Class="Base.It.App.Views.ToastHost"
+             x:DataType="svc:ToastService">
+
+    <!-- Stack of toasts, pinned bottom-right. Newer toasts appear below.
+         Each toast sits on a card with its kind-colored left stripe and a
+         dismiss X. Font glyphs used for the indicator are plain ASCII so
+         they render without requiring a specific icon font.
+
+         NOTE on hit-testing: the UserControl must NOT have a background
+         (transparent counts) — otherwise the entire window area captures
+         clicks and blocks the underlying NavigationView. Leaving Background
+         unset means empty pixels pass hits through; individual toast
+         borders have explicit Background via Classes="toast", so their X
+         buttons still receive clicks. -->
+    <ItemsControl ItemsSource="{Binding Items}"
+                  Background="{x:Null}"
+                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
+                  Margin="0,0,18,18">
+        <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+                <StackPanel Orientation="Vertical"/>
+            </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+            <DataTemplate DataType="svc:ToastItem">
+                <Border Classes="toast" Classes.success="{Binding Kind, Converter={x:Static svc:ToastKindConverters.IsSuccess}}"
+                        Classes.error="{Binding Kind, Converter={x:Static svc:ToastKindConverters.IsError}}"
+                        Classes.warning="{Binding Kind, Converter={x:Static svc:ToastKindConverters.IsWarning}}"
+                        Classes.info="{Binding Kind, Converter={x:Static svc:ToastKindConverters.IsInfo}}">
+                    <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                        <!-- Kind glyph: filled coloured circle so the type
+                             reads at a glance regardless of text length. -->
+                        <Border Grid.Column="0" Width="22" Height="22" CornerRadius="11"
+                                Background="{Binding Kind, Converter={x:Static svc:ToastKindConverters.ToBrush}}"
+                                VerticalAlignment="Top" Margin="0,2,10,0">
+                            <TextBlock Text="{Binding Glyph}" Foreground="White"
+                                       FontSize="12" FontWeight="Bold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" FontSize="13"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock Text="{Binding Message}" FontSize="11.5"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"
+                                       TextWrapping="Wrap"
+                                       IsVisible="{Binding ShowMessage}"/>
+                        </StackPanel>
+                        <Button Grid.Column="2" Content="✕" Width="24" Height="24"
+                                MinWidth="24" MinHeight="24" Padding="0"
+                                Background="Transparent" BorderThickness="0"
+                                FontSize="11" Foreground="{DynamicResource App.TextMutedBrush}"
+                                VerticalAlignment="Top" Margin="8,0,0,0"
+                                Click="OnDismiss"
+                                ToolTip.Tip="Dismiss"/>
+                    </Grid>
+                </Border>
+            </DataTemplate>
+        </ItemsControl.ItemTemplate>
+    </ItemsControl>
+</UserControl>

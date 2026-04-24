@@ -1,0 +1,206 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Base.It.App.ViewModels"
+             x:Class="Base.It.App.Views.WatchView"
+             x:DataType="vm:WatchViewModel">
+
+    <Grid RowDefinitions="*,Auto" ColumnDefinitions="260,*">
+
+        <!-- LEFT: groups list -->
+        <Border Grid.Row="0" Grid.Column="0" Classes="card" Margin="0,0,8,0" Padding="8">
+            <Grid RowDefinitions="Auto,*,Auto">
+
+                <TextBlock Grid.Row="0" Text="Watch groups" Classes="sectionTitle"/>
+
+                <Border Grid.Row="1" BorderThickness="1"
+                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}"
+                        CornerRadius="4" ClipToBounds="True">
+                    <ListBox ItemsSource="{Binding Groups}"
+                             SelectedItem="{Binding Selected}"
+                             Background="Transparent" BorderThickness="0">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="vm:WatchGroupItemVm">
+                                <Grid ColumnDefinitions="Auto,*" Margin="2,4">
+                                    <Ellipse Grid.Column="0" Width="8" Height="8"
+                                             Margin="0,0,8,0" VerticalAlignment="Center"
+                                             Fill="{Binding DotBrush}"/>
+                                    <TextBlock Grid.Column="1"
+                                               Text="{Binding Display}"
+                                               Foreground="{Binding NameBrush}"
+                                               VerticalAlignment="Center"
+                                               FontSize="12"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Border>
+
+                <!-- Admin row: one button per action. Start/Stop is dynamic
+                     — the group's Enabled state drives both label and colour. -->
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="4" Margin="0,8,0,0">
+                    <Button Content="New"    Command="{Binding NewGroupCommand}"       Classes="accent"/>
+                    <Button Content="Edit"   Command="{Binding EditSelectedCommand}"   IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                    <Button Content="Delete" Command="{Binding DeleteSelectedCommand}" IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                    <Button Content="{Binding StartStopLabel}"
+                            Command="{Binding ToggleSelectedCommand}"
+                            IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            ToolTip.Tip="Start or stop the selected group's watchers. New groups are created in the Stopped state."/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- RIGHT: header + sectioned drift + actions -->
+        <Grid Grid.Row="0" Grid.Column="1" RowDefinitions="Auto,*,Auto">
+
+            <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,8">
+                <StackPanel Orientation="Vertical">
+                    <TextBlock Text="{Binding HeaderTitle}"    FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock Text="{Binding HeaderSubtitle}" Opacity="0.75" FontSize="12" Margin="0,2,0,0"
+                               TextWrapping="Wrap"/>
+                    <TextBlock Text="{Binding LastUpdatedText}" Opacity="0.55" FontSize="11" FontStyle="Italic" Margin="0,2,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- Sections: fixed order SP → Functions → Triggers → Tables → Views.
+                 Each row shows [check][name][source-hash][target chips].
+                 Chips are one pill per target where the object is not InSync,
+                 colour-keyed off the drift kind. -->
+            <ScrollViewer Grid.Row="1">
+                <ItemsControl ItemsSource="{Binding Sections}">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate DataType="vm:WatchSectionVm">
+                            <Border Classes="card" Margin="0,0,0,8" Padding="0" ClipToBounds="True">
+                                <StackPanel>
+                                    <!-- Header: [chevron][title][count] | [scan toggle].
+                                         The ToggleButton takes its own column (0) and the
+                                         scan ToggleSwitch lives in column 1 with its own
+                                         padding so they never touch. Header has explicit
+                                         vertical and trailing padding so the toggle sits
+                                         off the border edge. -->
+                                    <Grid ColumnDefinitions="*,Auto" MinHeight="44">
+                                        <ToggleButton Grid.Column="0" Classes="sectionHeader"
+                                                      IsChecked="{Binding IsExpanded, Mode=TwoWay}"
+                                                      Opacity="{Binding IsEmpty, Converter={x:Static vm:BoolToOpacityConverter.MutedWhenTrue}}">
+                                            <Grid ColumnDefinitions="28,*,Auto" Margin="14,10,10,10">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding IsExpanded, Converter={x:Static vm:ExpanderGlyphConverter.Instance}}"
+                                                           FontSize="12" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                <TextBlock Grid.Column="1" Text="{Binding Title}"
+                                                           FontWeight="SemiBold" FontSize="13"
+                                                           VerticalAlignment="Center"/>
+                                                <Border Grid.Column="2" Classes="countPill" Margin="0,0,16,0">
+                                                    <TextBlock Text="{Binding Count, StringFormat='{}{0} changes'}"/>
+                                                </Border>
+                                            </Grid>
+                                        </ToggleButton>
+                                        <!-- Per-type scan toggle — sits in its own column
+                                             with a right margin so it never touches the
+                                             card's right border. -->
+                                        <ToggleSwitch Grid.Column="1"
+                                                      IsChecked="{Binding IsScanEnabled, Mode=TwoWay}"
+                                                      OnContent="" OffContent=""
+                                                      Margin="0,0,14,0" VerticalAlignment="Center"
+                                                      ToolTip.Tip="Include this object type in the scan. Turning it off clears these rows and skips them on the next tick."/>
+                                    </Grid>
+
+                                    <!-- Rows: [check 24][name *][src hash 70][status 80][chips *].
+                                         Hidden when section is empty OR collapsed by the user. -->
+                                    <ItemsControl ItemsSource="{Binding Rows}">
+                                        <ItemsControl.IsVisible>
+                                            <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                                <Binding Path="!IsEmpty"/>
+                                                <Binding Path="IsExpanded"/>
+                                            </MultiBinding>
+                                        </ItemsControl.IsVisible>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="vm:DriftRowVm">
+                                                <Border Padding="10,3" BorderThickness="0,1,0,0"
+                                                        BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
+                                                    <Grid ColumnDefinitions="24,*,70,80,1.5*">
+                                                        <CheckBox Grid.Column="0"
+                                                                  IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                                  VerticalAlignment="Center"
+                                                                  Padding="0" MinWidth="0"
+                                                                  ToolTip.Tip="Include this row when 'Stage Selected' is pressed."/>
+                                                        <TextBlock Grid.Column="1" Text="{Binding ObjectName}"
+                                                                   VerticalAlignment="Center"
+                                                                   Margin="4,0,8,0"
+                                                                   TextTrimming="CharacterEllipsis"
+                                                                   ToolTip.Tip="{Binding Message}"/>
+                                                        <TextBlock Grid.Column="2" Text="{Binding SourceHash}"
+                                                                   FontSize="11" Classes="mono" VerticalAlignment="Center"
+                                                                   Opacity="0.85"/>
+                                                        <TextBlock Grid.Column="3" Text="{Binding PrimaryStatus}"
+                                                                   FontSize="11" VerticalAlignment="Center"
+                                                                   Foreground="{Binding PrimaryStatus, Converter={x:Static vm:DriftStatusBrushConverter.Instance}}"/>
+
+                                                        <!-- Target chips: wraps if many -->
+                                                        <ItemsControl Grid.Column="4" ItemsSource="{Binding TargetTags}"
+                                                                      VerticalAlignment="Center">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel Orientation="Horizontal"/>
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate DataType="vm:TargetDriftTag">
+                                                                    <Border CornerRadius="8" Padding="6,1" Margin="2,2,0,0"
+                                                                            Background="{Binding Kind, Converter={x:Static vm:DriftStatusBrushConverter.Instance}}"
+                                                                            ToolTip.Tip="{Binding Kind}">
+                                                                        <TextBlock Text="{Binding Label}"
+                                                                                   Foreground="White"
+                                                                                   FontSize="10" FontWeight="SemiBold"/>
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </Grid>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+
+            <!-- Action row: Clear (left) · Stage* + Send (right).
+                 Clear wipes the rendered rows without stopping the watchers;
+                 Stage* export to DACPAC; Send pushes the changed list to Batch. -->
+            <Grid Grid.Row="2" Margin="0,8,0,0" ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                <Button Grid.Column="0" Content="Clear"
+                        Command="{Binding ClearResultsCommand}"
+                        IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        ToolTip.Tip="Wipe the visible rows. Watchers keep running; the next tick repopulates."/>
+                <!-- Stage buttons hidden entirely when DACPAC isn't
+                     configured — they only write to the DACPAC folder, so
+                     there's nothing for them to do without a folder. -->
+                <Button Grid.Column="2" Content="Stage Selected"
+                        Margin="6,0,0,0"
+                        Command="{Binding StageSelectedCommand}"
+                        IsVisible="{Binding DacpacConfigured}"
+                        IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        ToolTip.Tip="Export only the ticked rows to the DACPAC folder. No target mutation. No commit / PR."/>
+                <Button Grid.Column="3" Content="Stage All"
+                        Margin="6,0,0,0"
+                        Command="{Binding StageAllCommand}"
+                        IsVisible="{Binding DacpacConfigured}"
+                        IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        ToolTip.Tip="Export every syncable row to the DACPAC folder. No target mutation. No commit / PR."/>
+                <Button Grid.Column="4" Content="Send Changed to Batch" Classes="accent"
+                        Margin="6,0,0,0"
+                        Command="{Binding SendToBatchCommand}"
+                        IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+            </Grid>
+        </Grid>
+
+        <Border Grid.Row="1" Grid.ColumnSpan="2" Classes="pageStatus">
+            <TextBlock Text="{Binding Status}"/>
+        </Border>
+    </Grid>
+</UserControl>

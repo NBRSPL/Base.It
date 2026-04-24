@@ -1,0 +1,556 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Base.It.App.ViewModels"
+             xmlns:cfg="using:Base.It.Core.Config"
+             x:Class="Base.It.App.Views.SettingsView"
+             x:DataType="vm:SettingsViewModel">
+
+    <UserControl.Resources>
+        <!-- Small round icon button for inline row actions (add / delete).
+             Sits flush right on each row. Ghost background so it doesn't
+             pull focus until hovered. -->
+    </UserControl.Resources>
+
+    <Grid RowDefinitions="*,Auto" ColumnDefinitions="300,*">
+
+        <!-- Master: connections grouped as an expandable tree. -->
+        <Border Grid.Row="0" Grid.Column="0" Classes="card" Padding="0" Margin="0,0,8,0">
+            <Grid RowDefinitions="Auto,*,Auto">
+                <!-- Header row: title + count on the left, "+ group" action
+                     pinned to the right so it always has a predictable home.
+                     Keeps the bottom action row focused on "+ Connection". -->
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="12,10,8,8">
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="Connection groups" FontWeight="SemiBold" FontSize="13"
+                                   VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding GroupNodes.Count, StringFormat='({0})'}"
+                                   Foreground="{DynamicResource App.TextMutedBrush}"
+                                   FontSize="11" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <Button Grid.Column="1" Classes="rowIconBtn"
+                            Command="{Binding AddGroupAndRefreshCommand}"
+                            ToolTip.Tip="Add a new group">
+                        <TextBlock Text="＋" FontSize="15" FontWeight="Bold"
+                                   Foreground="{DynamicResource App.SuccessBrush}"/>
+                    </Button>
+                </Grid>
+
+                <!-- Empty state if no groups yet -->
+                <StackPanel Grid.Row="1" Spacing="6" Margin="12,8,12,0"
+                            IsVisible="{Binding !GroupNodes.Count}">
+                    <TextBlock Classes="subtle" TextWrapping="Wrap"
+                               Text="No connections yet. Click '+ Connection' below to add your first — it'll land in a Default group automatically."/>
+                </StackPanel>
+
+                <ScrollViewer Grid.Row="1" Padding="6,0"
+                              IsVisible="{Binding GroupNodes.Count}">
+                    <ItemsControl ItemsSource="{Binding GroupNodes}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:ConnectionGroupNodeVm">
+                                <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}"
+                                          Margin="0,0,0,6" Padding="0"
+                                          Tapped="OnGroupNodeTapped">
+                                    <Expander.Header>
+                                        <!-- Layout (left→right):
+                                             [name …] [count pill] [+ green] [delete red trash]
+                                             Delete is intentionally placed AT THE END, not
+                                             adjacent to the count pill — the green + acts as
+                                             a visual separator so the destructive button is
+                                             never mistaken for a counter tweak. -->
+                                        <Grid ColumnDefinitions="*,Auto,4,Auto,Auto" Margin="0,0,2,0">
+                                            <TextBox Grid.Column="0"
+                                                     Text="{Binding GroupName, Mode=TwoWay}"
+                                                     FontWeight="SemiBold" FontSize="12"
+                                                     BorderThickness="0"
+                                                     Background="Transparent"
+                                                     Padding="0" MinHeight="0"
+                                                     VerticalContentAlignment="Center"
+                                                     VerticalAlignment="Center"
+                                                     LostFocus="OnGroupNameCommit"
+                                                     KeyDown="OnGroupNameKeyDown"
+                                                     ToolTip.Tip="Click to rename. Press Enter or Tab out to save."/>
+
+                                            <Border Grid.Column="1" Classes="countPill">
+                                                <TextBlock Text="{Binding Connections.Count}"/>
+                                            </Border>
+
+                                            <!-- "+" add connection (GREEN, right-aligned on the
+                                                 group header). Separated from the count by a
+                                                 4px spacer so they don't visually merge. -->
+                                            <Button Grid.Column="3" Classes="rowIconBtn"
+                                                    Click="OnAddConnectionToGroup"
+                                                    Tag="{Binding GroupId}"
+                                                    ToolTip.Tip="Add a new connection to this group">
+                                                <TextBlock Text="＋" FontSize="15" FontWeight="Bold"
+                                                           Foreground="{DynamicResource App.SuccessBrush}"/>
+                                            </Button>
+
+                                            <!-- Delete group — RED trash icon, drawn as a Path
+                                                 so it renders without an icon font dependency.
+                                                 Deliberately different shape from the "✕" used
+                                                 to delete a connection row below. -->
+                                            <Button Grid.Column="4" Classes="rowIconBtn"
+                                                    Click="OnDeleteGroup"
+                                                    Tag="{Binding GroupId}"
+                                                    ToolTip.Tip="Delete this group (connections are kept)">
+                                                <Path Width="13" Height="13" Stretch="Uniform"
+                                                      Fill="{DynamicResource App.ErrorBrush}"
+                                                      Data="M4,3V1H10V3H13V5H12V15H2V5H1V3H4M5,3H9V1.5H5V3M3,5V14H11V5H3M5,6H6V13H5V6M8,6H9V13H8V6Z"/>
+                                            </Button>
+                                        </Grid>
+                                    </Expander.Header>
+                                    <ListBox ItemsSource="{Binding Connections}"
+                                             SelectedItem="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).Selected, Mode=TwoWay}"
+                                             Background="Transparent" BorderThickness="0" Padding="0,2">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate DataType="vm:ConnectionRow">
+                                                <Grid ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,2">
+                                                    <Border CornerRadius="3" Width="3"
+                                                            Background="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"/>
+                                                    <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                                        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" FontSize="12"/>
+                                                        <TextBlock Text="{Binding Auth}"
+                                                                   Foreground="{DynamicResource App.TextMutedBrush}"
+                                                                   FontSize="10"/>
+                                                    </StackPanel>
+                                                    <!-- Validation dot (only when invalid) -->
+                                                    <Border Grid.Column="2" Width="8" Height="8" CornerRadius="4"
+                                                            Background="{DynamicResource App.ErrorBrush}"
+                                                            VerticalAlignment="Center" Margin="6,0,4,0"
+                                                            IsVisible="{Binding !IsValid}"
+                                                            ToolTip.Tip="This connection has errors"/>
+                                                    <!-- Connection-level delete: RED "✕".
+                                                         Shape is deliberately different from
+                                                         the group's trash-can icon above so
+                                                         you can't confuse the two actions. -->
+                                                    <Button Grid.Column="3" Classes="rowIconBtn"
+                                                            Click="OnDeleteConnection"
+                                                            ToolTip.Tip="Delete this connection">
+                                                        <TextBlock Text="✕" FontSize="12" FontWeight="Bold"
+                                                                   Foreground="{DynamicResource App.ErrorBrush}"/>
+                                                    </Button>
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </Expander>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+                <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="6"
+                            Margin="10,8,10,10" HorizontalAlignment="Stretch">
+                    <!-- Only "+ Connection" at the bottom now. "+ Group"
+                         lives up in the header — one home per action. -->
+                    <Button Padding="10,4" HorizontalAlignment="Stretch"
+                            Command="{Binding AddCommand}"
+                            ToolTip.Tip="Add a new connection.">
+                        <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+                            <TextBlock Text="＋" FontSize="12" FontWeight="Bold"
+                                       Foreground="{DynamicResource App.SuccessBrush}"/>
+                            <TextBlock Text="Connection" FontSize="12"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Detail: dense editor. MaxWidth caps the content on wide
+             monitors so inputs don't stretch into empty acres. -->
+        <ScrollViewer Grid.Row="0" Grid.Column="1">
+            <StackPanel MaxWidth="820" HorizontalAlignment="Stretch">
+
+                <!-- Empty-state card for when no connection is selected -->
+                <Border Classes="card"
+                        IsVisible="{Binding Selected, Converter={x:Static ObjectConverters.IsNull}}"
+                        Padding="28">
+                    <StackPanel Spacing="10" HorizontalAlignment="Center">
+                        <TextBlock Text="No connection selected" FontWeight="SemiBold" FontSize="15"
+                                   HorizontalAlignment="Center"/>
+                        <TextBlock Classes="subtle" TextWrapping="Wrap" TextAlignment="Center"
+                                   Text="Pick a connection from the tree on the left, or add a new one."/>
+                        <Button Content="+ Add your first connection"
+                                Command="{Binding AddCommand}"
+                                Classes="accent" HorizontalAlignment="Center"
+                                Margin="0,6,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <Expander Classes="section"
+                          IsExpanded="{Binding IsConnectionEditorExpanded, Mode=TwoWay}"
+                          IsVisible="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="Connection details" FontWeight="SemiBold" FontSize="13"/>
+                            <TextBlock Text="{Binding Selected.Label}"
+                                       Foreground="{DynamicResource App.TextMutedBrush}" FontSize="11"
+                                       VerticalAlignment="Center"/>
+                            <Border Classes="tag" IsVisible="{Binding Selected.IsValid}">
+                                <TextBlock Text="valid"/>
+                            </Border>
+                            <Border Classes="tag"
+                                    Background="{DynamicResource App.FieldErrorBgBrush}"
+                                    BorderBrush="{DynamicResource App.FieldErrorBorderBrush}"
+                                    IsVisible="{Binding !Selected.IsValid}">
+                                <TextBlock Text="has errors"
+                                           Foreground="{DynamicResource App.ErrorBrush}"/>
+                            </Border>
+                        </StackPanel>
+                    </Expander.Header>
+                    <StackPanel DataContext="{Binding Selected}" x:DataType="vm:ConnectionRow">
+
+                        <!-- Compact grid. EVERY form row uses the exact same
+                             ColumnDefinitions (90 | * | 12 | 90 | *) so left
+                             and right column edges line up across every row
+                             — no more "Color" drifting away from its
+                             swatches because a peer row had Auto instead of
+                             *. Wrapped in Grid.Styles so we don't need to
+                             repeat the ColumnDefinitions for every child. -->
+                        <Grid Classes="formRow" ColumnDefinitions="90,*,12,90,*">
+                            <TextBlock Text="Environment"/>
+                            <StackPanel Grid.Column="1" Spacing="2">
+                                <TextBox Text="{Binding Environment}"
+                                         Classes.errorField="{Binding EnvironmentError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                         Watermark="e.g. Development"/>
+                                <TextBlock Text="{Binding EnvironmentError}" Classes="errorText"
+                                           IsVisible="{Binding EnvironmentError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                            </StackPanel>
+                            <TextBlock Grid.Column="3" Text="Database"/>
+                            <StackPanel Grid.Column="4" Spacing="2">
+                                <TextBox Text="{Binding Database}"
+                                         Classes.errorField="{Binding DatabaseError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                         Watermark="Database name"/>
+                                <TextBlock Text="{Binding DatabaseError}" Classes="errorText"
+                                           IsVisible="{Binding DatabaseError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Classes="formRow" ColumnDefinitions="90,*,12,90,*">
+                            <TextBlock Text="Display"/>
+                            <TextBox Grid.Column="1" Text="{Binding DisplayName}"
+                                     Watermark="Custom label (optional)"/>
+                            <TextBlock Grid.Column="3" Text="Color"/>
+                            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4"
+                                        VerticalAlignment="Center" HorizontalAlignment="Left">
+                                <Border Width="20" Height="20" CornerRadius="4"
+                                        Background="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                        Margin="0,0,4,0"/>
+                                <ItemsControl ItemsSource="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).Swatches}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="4"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Padding="0" Width="18" Height="18" CornerRadius="9"
+                                                    BorderThickness="1"
+                                                    BorderBrush="{DynamicResource App.StrokeBrush}"
+                                                    Background="{Binding Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                    Command="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).ApplyColorCommand}"
+                                                    CommandParameter="{Binding}"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Classes="formRow" ColumnDefinitions="90,*,12,90,*">
+                            <TextBlock Text="Auth"/>
+                            <ComboBox Grid.Column="1" Grid.ColumnSpan="4" HorizontalAlignment="Stretch"
+                                      ItemsSource="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).AuthModes}"
+                                      SelectedItem="{Binding Auth}"/>
+                        </Grid>
+
+                        <StackPanel IsVisible="{Binding Auth, Converter={x:Static vm:AuthModeEquals.Raw}}">
+                            <Grid Classes="formRow" ColumnDefinitions="90,*,12,90,*">
+                                <TextBlock Text="Conn string"/>
+                                <StackPanel Grid.Column="1" Grid.ColumnSpan="4" Spacing="2">
+                                    <TextBox Text="{Binding RawConnectionString}"
+                                             Classes.errorField="{Binding RawError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                             AcceptsReturn="True" MinHeight="44"
+                                             Watermark="Server=...;Database=...;User Id=...;Password=...;"/>
+                                    <TextBlock Text="{Binding RawError}" Classes="errorText"
+                                               IsVisible="{Binding RawError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+
+                        <StackPanel IsVisible="{Binding Auth, Converter={x:Static vm:AuthModeEquals.NotRaw}}">
+                            <Grid Classes="formRow" ColumnDefinitions="90,*,12,90,*">
+                                <TextBlock Text="Server"/>
+                                <StackPanel Grid.Column="1" Spacing="2">
+                                    <TextBox Text="{Binding Server}"
+                                             Classes.errorField="{Binding ServerError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                             Watermark="Hostname or IP"/>
+                                    <TextBlock Text="{Binding ServerError}" Classes="errorText"
+                                               IsVisible="{Binding ServerError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                </StackPanel>
+                                <TextBlock Grid.Column="3" Text="SQL db"/>
+                                <TextBox Grid.Column="4" Text="{Binding DatabaseName}"
+                                         Watermark="DB name on server (optional)"/>
+                            </Grid>
+                            <Grid Classes="formRow" ColumnDefinitions="90,*,12,90,*"
+                                  IsVisible="{Binding Auth, Converter={x:Static vm:AuthModeEquals.Sql}}">
+                                <TextBlock Text="Username"/>
+                                <StackPanel Grid.Column="1" Spacing="2">
+                                    <TextBox Text="{Binding Username}"
+                                             Classes.errorField="{Binding UsernameError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                             Watermark="Login name"/>
+                                    <TextBlock Text="{Binding UsernameError}" Classes="errorText"
+                                               IsVisible="{Binding UsernameError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                </StackPanel>
+                                <TextBlock Grid.Column="3" Text="Password"/>
+                                <StackPanel Grid.Column="4" Spacing="2">
+                                    <TextBox Text="{Binding Password}"
+                                             Classes.errorField="{Binding PasswordError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                             PasswordChar="&#x2022;"/>
+                                    <TextBlock Text="{Binding PasswordError}" Classes="errorText"
+                                               IsVisible="{Binding PasswordError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Classes="subtle" Margin="0,2,0,0"
+                                       IsVisible="{Binding Auth, Converter={x:Static vm:AuthModeEquals.Windows}}"
+                                       Text="Windows Integrated: no credentials stored."/>
+                        </StackPanel>
+
+                        <!-- Groups picker -->
+                        <StackPanel Margin="0,12,0,0" IsVisible="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).HasAnyGroup}">
+                            <TextBlock Text="Groups" FontSize="11"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"
+                                       Margin="0,0,0,4"/>
+                            <Border BorderThickness="1" CornerRadius="6" Padding="8"
+                                    BorderBrush="{DynamicResource App.StrokeBrush}"
+                                    Background="{DynamicResource App.ElevatedBgBrush}">
+                                <ItemsControl ItemsSource="{Binding Groups}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="vm:ConnectionRowGroupVm">
+                                            <CheckBox Content="{Binding GroupName}"
+                                                      IsChecked="{Binding IsInGroup, Mode=TwoWay}"
+                                                      Margin="0,0,12,2"/>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </Border>
+                            <TextBlock Classes="subtle" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       Text="Tick the groups this connection belongs to. Saved with the connection."/>
+                        </StackPanel>
+
+                        <!-- Action row: Test Connection + Save -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8"
+                                    Margin="0,14,0,0">
+                            <Button Content="Test connection"
+                                    Command="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).TestConnectionCommand}"
+                                    IsEnabled="{Binding !$parent[UserControl].((vm:SettingsViewModel)DataContext).IsTesting}"
+                                    ToolTip.Tip="Open a real SqlConnection and run SELECT 1. Result shows as a toast."/>
+                            <Button Content="Save connections" Classes="accent"
+                                    Command="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext).SaveCommand}"
+                                    ToolTip.Tip="Persist the connection list and its group memberships."/>
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Appearance — theme radio -->
+                <Expander Classes="section" IsExpanded="False">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="Appearance" FontWeight="SemiBold" FontSize="13"/>
+                            <Border Classes="tag"><TextBlock Text="theme"/></Border>
+                        </StackPanel>
+                    </Expander.Header>
+                    <StackPanel Spacing="8">
+                        <TextBlock Classes="subtle" TextWrapping="Wrap"
+                                   Text="Switch between a crisp near-black dark surface or a bright white light surface. Accent colour is cyan in both themes."/>
+                        <Grid Classes="formRow" ColumnDefinitions="110,*">
+                            <TextBlock Text="Theme"/>
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                                <RadioButton GroupName="Theme" Content="Dark"
+                                             IsChecked="{Binding ThemePref, Converter={x:Static vm:ThemeEnumEquals.Dark}}"
+                                             Command="{Binding SetThemeDarkCommand}"/>
+                                <RadioButton GroupName="Theme" Content="Light"
+                                             IsChecked="{Binding ThemePref, Converter={x:Static vm:ThemeEnumEquals.Light}}"
+                                             Command="{Binding SetThemeLightCommand}"/>
+                                <RadioButton GroupName="Theme" Content="System"
+                                             IsChecked="{Binding ThemePref, Converter={x:Static vm:ThemeEnumEquals.System}}"
+                                             Command="{Binding SetThemeSystemCommand}"/>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Updates — Velopack-backed auto-update against GitHub
+                     Releases. Hidden when running from a dev build (the
+                     updater reports NotInstalled) because Setup.exe is
+                     the only context where applying an update makes
+                     sense. -->
+                <Expander Classes="section" IsExpanded="False"
+                          IsVisible="{Binding Updater.IsInstalled}">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="Updates" FontWeight="SemiBold" FontSize="13"/>
+                            <Border Classes="tag"><TextBlock Text="auto"/></Border>
+                        </StackPanel>
+                    </Expander.Header>
+                    <StackPanel Spacing="8">
+                        <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Current version" Classes="subtle"/>
+                            <SelectableTextBlock Grid.Row="0" Grid.Column="1" Classes="mono"
+                                                 Text="{Binding Updater.CurrentVersion}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Text="Latest on server"
+                                       Classes="subtle" Margin="0,4,0,0"/>
+                            <SelectableTextBlock Grid.Row="1" Grid.Column="1" Classes="mono"
+                                                 Margin="0,4,0,0"
+                                                 Text="{Binding Updater.LatestVersion}"/>
+                        </Grid>
+
+                        <!-- Progress bar only when downloading. -->
+                        <ProgressBar Minimum="0" Maximum="100"
+                                     Value="{Binding Updater.DownloadPercent}"
+                                     Height="4" Margin="0,4,0,0"
+                                     Foreground="{DynamicResource App.AccentBrush}"
+                                     Background="{DynamicResource App.ElevatedBgBrush}"
+                                     IsVisible="{Binding Updater.State, Converter={x:Static vm:UpdateStateEquals.Downloading}}"/>
+
+                        <TextBlock Classes="subtle" TextWrapping="Wrap"
+                                   Text="Updates are pulled from this project's GitHub Releases. Delta updates only download the changed bytes, so post-v1 updates are typically a few MB."/>
+                        <TextBlock Text="{Binding Updater.LastError}" Classes="errorText"
+                                   IsVisible="{Binding Updater.LastError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                                   TextWrapping="Wrap"/>
+
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="6"
+                                    Margin="0,4,0,0">
+                            <Button Content="Check for updates"
+                                    Command="{Binding CheckForUpdatesCommand}"
+                                    IsEnabled="{Binding Updater.CanCheck}"/>
+                            <Button Content="Download"
+                                    Command="{Binding DownloadUpdateCommand}"
+                                    IsVisible="{Binding Updater.State, Converter={x:Static vm:UpdateStateEquals.Available}}"/>
+                            <Button Content="Install &amp; Restart" Classes="accent"
+                                    Command="{Binding ApplyUpdateCommand}"
+                                    IsEnabled="{Binding Updater.CanApply}"
+                                    IsVisible="{Binding Updater.CanApply}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Backup folder — where every Sync/Batch/Backup/Watch
+                     run writes its source+target .sql snapshots and zip.
+                     Files are always named with a millisecond timestamp
+                     plus a collision counter; the store will never
+                     overwrite an existing file. -->
+                <Expander Classes="section" IsExpanded="False">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="Backup folder" FontWeight="SemiBold" FontSize="13"/>
+                            <Border Classes="tag"><TextBlock Text="never overwrites"/></Border>
+                        </StackPanel>
+                    </Expander.Header>
+                    <StackPanel Spacing="8">
+                        <TextBlock Classes="subtle" TextWrapping="Wrap"
+                                   Text="Pick where Base.it writes the source and target snapshots that every Sync / Batch / Backup / Watch run produces. Files are named with a millisecond timestamp plus a collision counter, so nothing is ever overwritten — even on identical second-per-second runs."/>
+                        <Grid Classes="formRow" ColumnDefinitions="90,*,Auto,Auto">
+                            <TextBlock Text="Folder"/>
+                            <TextBox Grid.Column="1" Text="{Binding BackupRootInput}"
+                                     Watermark="e.g. C:\DB_Backup"/>
+                            <Button Grid.Column="2" Margin="6,0,0,0" Content="Browse…"
+                                    Command="{Binding BrowseBackupFolderCommand}"/>
+                            <Button Grid.Column="3" Margin="6,0,0,0" Content="Reset"
+                                    Command="{Binding ResetBackupRootCommand}"
+                                    ToolTip.Tip="Revert to the default folder."/>
+                        </Grid>
+                        <TextBlock Text="{Binding BackupStatus}" Classes="subtle" TextWrapping="Wrap"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                    Margin="0,4,0,0">
+                            <Button Content="Save folder" Classes="accent"
+                                    Command="{Binding SaveBackupRootCommand}"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
+
+                <!-- DACPAC / SSDT export -->
+                <Expander Classes="section" IsExpanded="False">
+                    <Expander.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                            <TextBlock Text="DACPAC / SSDT export" FontWeight="SemiBold" FontSize="13"/>
+                            <Border Classes="tag">
+                                <TextBlock Text="files only"/>
+                            </Border>
+                        </StackPanel>
+                    </Expander.Header>
+                    <StackPanel>
+                        <CheckBox Content="Enabled" IsChecked="{Binding DacpacEnabled}"
+                                  ToolTip.Tip="Master switch. When off, no files are written regardless of per-page checkboxes."
+                                  Margin="0,0,0,6"/>
+
+                        <Grid Classes="formRow" ColumnDefinitions="110,*,Auto">
+                            <TextBlock Text="Root folder"/>
+                            <TextBox Grid.Column="1" Text="{Binding DacpacRootFolder}"
+                                     Watermark="Folder containing your .sqlproj"/>
+                            <Button Grid.Column="2" Margin="6,0,0,0" Content="Browse…"
+                                    Command="{Binding BrowseDacpacFolderCommand}"/>
+                        </Grid>
+
+                        <TextBlock Classes="subtle" Margin="0,4,0,0" TextWrapping="Wrap"
+                                   Text="Sync / Batch / Watch will write object definitions here when their per-page 'Write to DACPAC folder' box is ticked. No git actions are performed — commit the changes yourself."/>
+
+                        <TextBlock Text="{Binding DacpacStatus}" Classes="subtle"
+                                   Margin="0,6,0,0" TextWrapping="Wrap"/>
+
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                                    Margin="0,10,0,0">
+                            <Button Content="Save DACPAC" Command="{Binding SaveDacpacCommand}" Classes="accent"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Expander>
+
+                <!-- Static info box — not actionable, so it deliberately
+                     does NOT look like the collapsible sections above.
+                     Left-side accent stripe + (i) glyph call it out as
+                     reference info; no expander chevron, no tag pill. -->
+                <Border Margin="0,0,0,10" Padding="14,10"
+                        CornerRadius="8"
+                        Background="{DynamicResource App.ElevatedBgBrush}"
+                        BorderBrush="{DynamicResource App.StrokeBrush}"
+                        BorderThickness="1">
+                    <Grid ColumnDefinitions="Auto,*">
+                        <!-- (i) icon circle — theme-aware info color -->
+                        <Border Grid.Column="0" Width="22" Height="22" CornerRadius="11"
+                                Background="{DynamicResource App.InfoBrush}"
+                                VerticalAlignment="Top" Margin="0,2,10,0">
+                            <TextBlock Text="i" Foreground="White"
+                                       FontSize="13" FontWeight="Bold" FontStyle="Italic"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <StackPanel Grid.Column="1" Spacing="4">
+                            <TextBlock Text="About connection groups"
+                                       FontWeight="SemiBold" FontSize="12"/>
+                            <TextBlock Classes="subtle" TextWrapping="Wrap"
+                                       Text="Groups are logical bundles of related connections. The top-bar selector makes one active at a time — Sync, Batch, Watch and the fetch dock only see that group's members. A connection can belong to many groups."/>
+                            <TextBlock Classes="subtle" TextWrapping="Wrap"
+                                       Text="Manage groups on the left: click a name to rename inline · ＋ on a group to add a connection to it · 🗑 to delete a group · ✕ on a connection row to delete that connection."/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="1" Grid.ColumnSpan="2"
+                Padding="12,8" BorderThickness="0,1,0,0"
+                BorderBrush="{DynamicResource App.DividerBrush}">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Text="{Binding Status}"
+                           Foreground="{DynamicResource App.TextSecondaryBrush}"
+                           FontSize="11" VerticalAlignment="Center"/>
+                <Button Grid.Column="1" Content="Save all" Classes="accent"
+                        MinHeight="30" Padding="14,2"
+                        Command="{Binding SaveCommand}"/>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

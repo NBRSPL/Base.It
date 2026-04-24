@@ -1,0 +1,163 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Base.It.App.ViewModels"
+             xmlns:cfg="using:Base.It.Core.Config"
+             x:Class="Base.It.App.Views.BatchView"
+             x:DataType="vm:BatchViewModel">
+
+    <!-- Rows:
+         0  Source + badge
+         1  Targets checklist
+         2  Objects toolbar (file input, load, manual, add, backup, execute, clear, counters)
+         3  DACPAC opt-in (collapsed when not configured)
+         4  Status filter
+         5  DataGrid (filtered)
+         6  Status bar -->
+    <DockPanel>
+        <!-- Slim indeterminate progress bar docked to the top of the pane. -->
+        <ProgressBar DockPanel.Dock="Top" Classes="pageLoader" IsVisible="{Binding IsBusy}"/>
+
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto">
+
+        <!-- Source -->
+        <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Source" VerticalAlignment="Center"
+                           Margin="0,0,8,0" FontSize="12" Opacity="0.7"/>
+                <ComboBox Grid.Column="1" Width="110"
+                          ItemsSource="{Binding Environments}" SelectedItem="{Binding SourceEnv}"
+                          PlaceholderText="Environment"/>
+                <TextBlock Grid.Column="2" Text="/" VerticalAlignment="Center"
+                           Margin="6,0,6,0" Opacity="0.5"/>
+                <ComboBox Grid.Column="3" Width="150"
+                          ItemsSource="{Binding Databases}" SelectedItem="{Binding SourceDatabase}"
+                          PlaceholderText="Database"/>
+                <Border Grid.Column="5" Classes="badge"
+                        Background="{Binding SourceProfile.Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                        IsVisible="{Binding SourceProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        VerticalAlignment="Center" Margin="12,0,0,0">
+                    <TextBlock Text="{Binding SourceProfile.Label}"/>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- Targets — chip-style ToggleButtons matching the Sync pane. -->
+        <Border Grid.Row="1" Classes="toolbar" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="Auto,*">
+                <TextBlock Grid.Column="0" Text="Targets" VerticalAlignment="Center"
+                           Margin="0,0,10,0" FontSize="12" Opacity="0.7"/>
+                <ScrollViewer Grid.Column="1"
+                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding Targets}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="vm:TargetPickVm">
+                                <ToggleButton Classes="chip"
+                                              Content="{Binding Label}"
+                                              IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- Objects toolbar: fixed widths, consistent MinWidth on buttons.
+             Live OK/Fail counters live on the filter row below so this
+             toolbar doesn't overflow narrow windows. -->
+        <Border Grid.Row="2" Classes="toolbar" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
+                <TextBox Grid.Column="0" Width="320" Text="{Binding FilePath}"
+                         Watermark=".csv / .xlsx (column 'Object name')"/>
+                <Button  Grid.Column="1" Margin="4,0,0,0" MinWidth="64" Content="Load"
+                         Command="{Binding LoadFromFileCommand}"/>
+                <TextBox Grid.Column="2" Width="180" Margin="8,0,0,0"
+                         Text="{Binding ManualObject}" Watermark="Manual object"/>
+                <Button  Grid.Column="3" Margin="4,0,0,0" MinWidth="64" Content="Add"
+                         Command="{Binding AddManualCommand}"/>
+                <Button  Grid.Column="4" Margin="12,0,0,0" MinWidth="72" Content="Backup"
+                         Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
+                         ToolTip.Tip="Capture each row from source + ticked targets without altering anything."/>
+                <Button  Grid.Column="5" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
+                         Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
+                <Button  Grid.Column="6" Margin="4,0,0,0" MinWidth="64" Content="Clear"
+                         Command="{Binding ClearCommand}"
+                         ToolTip.Tip="Remove every row from the list."/>
+                <Button  Grid.Column="7" Margin="4,0,0,0" MinWidth="120" Content="Remove selected"
+                         Command="{Binding RemoveCheckedCommand}"
+                         ToolTip.Tip="Remove rows whose checkbox (left-most column) is ticked."/>
+            </Grid>
+        </Border>
+
+        <!-- DACPAC opt-in -->
+        <Border Grid.Row="3" Classes="toolbar" Margin="0,0,0,6"
+                IsVisible="{Binding DacpacConfigured}">
+            <Grid ColumnDefinitions="Auto,*,Auto">
+                <CheckBox Grid.Column="0" Content="Write to DACPAC folder"
+                          IsChecked="{Binding StageAsDacpacBranch}"
+                          IsEnabled="{Binding !IsBusy}"
+                          ToolTip.Tip="After each successful sync, write the object's definition to the configured DACPAC / SSDT folder. No git actions are taken — commit the changes yourself."/>
+                <TextBlock Grid.Column="2" FontSize="11" Opacity="0.55" VerticalAlignment="Center"
+                           Text="configured in Settings → DACPAC"/>
+            </Grid>
+        </Border>
+
+        <!-- Status filter + live OK/Fail counters (moved here from the
+             objects toolbar so they don't clip on narrow windows). -->
+        <Border Grid.Row="4" Classes="toolbar" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                <TextBlock Grid.Column="0" Text="Filter" VerticalAlignment="Center"
+                           Margin="0,0,8,0" FontSize="12" Opacity="0.7"/>
+                <ComboBox Grid.Column="1" Width="140"
+                          ItemsSource="{Binding StatusFilterOptions}"
+                          SelectedItem="{Binding StatusFilter}"/>
+                <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="12,0,12,0"
+                           FontSize="11" Opacity="0.55"
+                           Text="Rows matching the selected status. 'All' shows everything."
+                           TextTrimming="CharacterEllipsis"/>
+                <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="0,0,12,0"
+                           Text="{Binding SuccessCount, StringFormat='OK: {0}'}"
+                           Foreground="{DynamicResource SystemFillColorSuccessBrush}" FontSize="11"/>
+                <TextBlock Grid.Column="4" VerticalAlignment="Center"
+                           Text="{Binding FailCount, StringFormat='Fail: {0}'}"
+                           Foreground="{DynamicResource SystemFillColorCriticalBrush}" FontSize="11"/>
+            </Grid>
+        </Border>
+
+        <!-- Grid -->
+        <Border Grid.Row="5" Classes="card" Padding="0" ClipToBounds="True">
+            <DataGrid ItemsSource="{Binding FilteredItems}" AutoGenerateColumns="False"
+                      HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                      CanUserReorderColumns="False">
+                <DataGrid.Columns>
+                    <!-- Tick-to-select column. Widened so the checkbox
+                         doesn't clip against the row border, and Name
+                         blank so the header row doesn't draw a label
+                         next to it. Feeds RemoveCheckedCommand. -->
+                    <DataGridTemplateColumn Header="" Width="44" CanUserResize="False" CanUserSort="False">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate DataType="vm:BatchItem">
+                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Margin="0" Padding="0" MinWidth="0"/>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTextColumn Header="#"           Binding="{Binding Index}"   Width="50"  IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Object name" Binding="{Binding Name}"    Width="*"/>
+                    <DataGridTextColumn Header="Status"      Binding="{Binding Status}"  Width="100" IsReadOnly="True"/>
+                    <DataGridTextColumn Header="Message"     Binding="{Binding Message}" Width="2*"  IsReadOnly="True"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+
+        <Border Grid.Row="6" Classes="pageStatus">
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+        </Border>
+    </Grid>
+    </DockPanel>
+</UserControl>
