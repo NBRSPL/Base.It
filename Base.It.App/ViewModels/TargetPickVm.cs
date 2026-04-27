@@ -29,14 +29,13 @@ public sealed partial class TargetPickVm : ObservableObject
     {
         env ??= ""; database ??= "";
         var profile = svc.Connections.GetProfile(env, database);
-        // Show just the display name when the user has set one (they are
-        // enforced unique by Settings), otherwise fall back to the
-        // environment. The database name is redundant when a display name
-        // is present, and for multi-env setups the env name is the
-        // natural identifier.
+        // DisplayName takes priority when set — that's the whole reason
+        // the user typed it. Fall back to the explicit "ENV / Database"
+        // pair so chip labels are unambiguous when there's no custom name,
+        // and so the chip matches the source picker's primary line.
         var label = profile is not null && !string.IsNullOrWhiteSpace(profile.DisplayName)
             ? profile.DisplayName!
-            : env;
+            : $"{env} / {database}";
         return new TargetPickVm(env, database, label, isChecked);
     }
 

@@ -32,6 +32,28 @@ public static class EnvironmentListProvider
             .Where(s => !string.IsNullOrWhiteSpace(s))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
 
+    /// <summary>
+    /// Flat list of every visible (env, database) pair as a searchable
+    /// <see cref="EndpointPick"/>. Used by the Sync / Batch source picker
+    /// to replace the cascading env-then-db dropdowns. DisplayName takes
+    /// priority over the raw env/db pair so the picker matches what users
+    /// see on target chips and on the source colour badge.
+    /// </summary>
+    public static IReadOnlyList<EndpointPick> Endpoints(AppServices svc) =>
+        VisibleConnections(svc)
+            .Select(c =>
+            {
+                var sub = $"{c.Environment} / {c.Database}";
+                var label = string.IsNullOrWhiteSpace(c.DisplayName) ? sub : c.DisplayName!;
+                return new EndpointPick(
+                    Environment: c.Environment ?? "",
+                    Database:    c.Database    ?? "",
+                    Label:       label,
+                    SubLabel:    sub,
+                    Color:       c.Color);
+            })
+            .ToList();
+
     public static string? ConnectionString(AppServices svc, string env, string db) =>
         svc.Connections.Get(env, db);
 }

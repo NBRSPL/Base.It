@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Base.It.App.ViewModels;
 
 namespace Base.It.App.Services;
 
@@ -46,6 +47,27 @@ public sealed class AppSettingsStore
         set { _file.BackupRoot = value; Save(); }
     }
 
+    /// <summary>
+    /// Saved source/target presets shared by the Sync + Batch panes. Returns
+    /// a defensive copy so callers can't mutate persisted state without
+    /// going through <see cref="UpsertProfile"/> / <see cref="RemoveProfile"/>.
+    /// </summary>
+    public IReadOnlyList<EndpointProfile> Profiles => _file.Profiles.ToList();
+
+    public void UpsertProfile(EndpointProfile profile)
+    {
+        var i = _file.Profiles.FindIndex(p => p.Id == profile.Id);
+        if (i >= 0) _file.Profiles[i] = profile;
+        else        _file.Profiles.Add(profile);
+        Save();
+    }
+
+    public void RemoveProfile(string id)
+    {
+        _file.Profiles.RemoveAll(p => p.Id == id);
+        Save();
+    }
+
     private AppSettingsFile? TryLoad()
     {
         try
@@ -72,5 +94,6 @@ public sealed class AppSettingsStore
         public ThemePref Theme { get; set; } = ThemePref.Dark;
         public bool HasSeenGettingStarted { get; set; } = false;
         public string? BackupRoot { get; set; } = null;
+        public List<EndpointProfile> Profiles { get; set; } = new();
     }
 }

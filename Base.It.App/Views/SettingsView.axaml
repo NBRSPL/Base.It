@@ -99,8 +99,14 @@
                                             </Button>
                                         </Grid>
                                     </Expander.Header>
+                                    <!-- Each ListBox binds to its OWN node's
+                                         SelectedInGroup, not a shared parent
+                                         property. The VM coordinates: when one
+                                         node lights up, sibling nodes are cleared
+                                         and Selected mirrors the pick. No shared
+                                         setter = no binding fight. -->
                                     <ListBox ItemsSource="{Binding Connections}"
-                                             SelectedItem="{Binding $parent[ItemsControl].((vm:SettingsViewModel)DataContext).Selected, Mode=TwoWay}"
+                                             SelectedItem="{Binding SelectedInGroup, Mode=TwoWay}"
                                              Background="Transparent" BorderThickness="0" Padding="0,2">
                                         <ListBox.ItemTemplate>
                                             <DataTemplate DataType="vm:ConnectionRow">

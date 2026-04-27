@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using Base.It.App.Services;
 using Base.It.Core.Config;
 using Base.It.Core.Dacpac;
@@ -27,6 +28,21 @@ public sealed partial class SyncViewModel : ObservableObject
     [ObservableProperty] private string _lastZipPath = "";
     [ObservableProperty] private EnvironmentConfig? _sourceProfile;
 
+    // UI alias for the source — backed by SourceEnv + SourceDatabase. Kept
+    // in sync via _syncingEndpoint so neither side recurses into the other.
+    [ObservableProperty] private EndpointPick? _selectedSourceEndpoint;
+
+    // Selected saved profile. Setting it applies source + ticked-target
+    // state in one shot. Setting back to null clears the selection only —
+    // it doesn't undo whatever the user had picked from the profile.
+    [ObservableProperty] private EndpointProfile? _selectedProfile;
+
+    /// <summary>Live filter text driving <see cref="FilteredTargets"/>. Empty = show every target.</summary>
+    [ObservableProperty] private string _targetFilter = "";
+
+    private bool _syncingEndpoint;
+    private bool _suspendRebuild;
+
     // DACPAC per-run opt-in — mirrors the Batch pane. Reserves the
     // configured DACPAC folder + optional git branch staging so the user
     // has a review-gated history of every successful single-object sync.
@@ -41,6 +57,27 @@ public sealed partial class SyncViewModel : ObservableObject
     public ObservableCollection<string> Environments { get; } = new();
     public ObservableCollection<string> Databases    { get; } = new();
     public ObservableCollection<TargetPickVm> Targets { get; } = new();
+
+    /// <summary>Flat searchable endpoint list bound to the source AutoCompleteBox.</summary>
+    public ObservableCollection<EndpointPick> Endpoints { get; } = new();
+
+    /// <summary>User-saved source/target presets (shared with Batch).</summary>
+    public ObservableCollection<EndpointProfile> Profiles { get; } = new();
+
+    /// <summary>
+    /// Live-filtered view of <see cref="Targets"/> driven by
+    /// <see cref="TargetFilter"/>. The chip ItemsControl binds to this so a
+    /// 50-connection group is still navigable — type a fragment of the
+    /// label / env / db to narrow the wrap.
+    /// </summary>
+    public ObservableCollection<TargetPickVm> FilteredTargets { get; } = new();
+
+    /// <summary>Swap is meaningful only when there's exactly one ticked target to swap with.</summary>
+    public bool CanSwap =>
+        SelectedSourceEndpoint is not null && Targets.Count(t => t.IsChecked) == 1;
+
+    public int TargetSelectedCount => Targets.Count(t => t.IsChecked);
+    public int TargetTotalCount    => Targets.Count;
 
     public SyncViewModel(AppServices svc)
     {
@@ -73,14 +110,111 @@ public sealed partial class SyncViewModel : ObservableObject
         foreach (var e in EnvironmentListProvider.Environments(_svc)) Environments.Add(e);
         Databases.Clear();
         foreach (var d in EnvironmentListProvider.Databases(_svc)) Databases.Add(d);
+
+        // Flat endpoint list for the AutoCompleteBox source picker.
+        Endpoints.Clear();
+        foreach (var ep in EnvironmentListProvider.Endpoints(_svc)) Endpoints.Add(ep);
+
         SourceEnv      ??= Environments.FirstOrDefault();
         SourceDatabase ??= Databases.FirstOrDefault();
         RefreshProfiles();
         RebuildTargets();
+        SyncSelectedEndpoint();
+        ReloadProfiles();
     }
 
-    partial void OnSourceEnvChanged(string? value)      { RefreshProfiles(); RebuildTargets(); }
-    partial void OnSourceDatabaseChanged(string? value) { RefreshProfiles(); RebuildTargets(); }
+    /// <summary>Pull the persisted profile list into the bound collection. Preserves selection by Id.</summary>
+    private void ReloadProfiles()
+    {
+        var keepId = SelectedProfile?.Id;
+        Profiles.Clear();
+        foreach (var p in _svc.AppSettings.Profiles.OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+            Profiles.Add(p);
+        if (!string.IsNullOrEmpty(keepId))
+            SelectedProfile = Profiles.FirstOrDefault(p => p.Id == keepId);
+    }
+
+    partial void OnSourceEnvChanged(string? value)
+    {
+        SyncSelectedEndpoint();
+        if (_suspendRebuild) return;
+        RefreshProfiles();
+        RebuildTargets();
+    }
+    partial void OnSourceDatabaseChanged(string? value)
+    {
+        SyncSelectedEndpoint();
+        if (_suspendRebuild) return;
+        RefreshProfiles();
+        RebuildTargets();
+    }
+
+    partial void OnSelectedSourceEndpointChanged(EndpointPick? value)
+    {
+        if (_syncingEndpoint || value is null) return;
+        if (string.Equals(value.Environment, SourceEnv,      StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(value.Database,    SourceDatabase, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _syncingEndpoint = true;
+        try
+        {
+            _suspendRebuild = true;
+            try
+            {
+                SourceEnv      = value.Environment;
+                SourceDatabase = value.Database;
+            }
+            finally { _suspendRebuild = false; }
+        }
+        finally { _syncingEndpoint = false; }
+
+        RefreshProfiles();
+        RebuildTargets();
+    }
+
+    partial void OnSelectedProfileChanged(EndpointProfile? value)
+    {
+        if (value is null) return;
+        ApplyProfile(value);
+    }
+
+    private void SyncSelectedEndpoint()
+    {
+        if (_syncingEndpoint) return;
+        var match = Endpoints.FirstOrDefault(e =>
+            string.Equals(e.Environment, SourceEnv,      StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(e.Database,    SourceDatabase, StringComparison.OrdinalIgnoreCase));
+        if (ReferenceEquals(match, SelectedSourceEndpoint)) return;
+        _syncingEndpoint = true;
+        try { SelectedSourceEndpoint = match; }
+        finally { _syncingEndpoint = false; }
+    }
+
+    /// <summary>
+    /// Restore source + target chip state from a saved profile. Atomic — the
+    /// targets list is rebuilt once, then chips matching the profile keys are
+    /// re-checked. No-op when the profile's source isn't visible under the
+    /// active connection group (the source picker still shows "no match").
+    /// </summary>
+    private void ApplyProfile(EndpointProfile p)
+    {
+        _suspendRebuild = true;
+        try
+        {
+            SourceEnv      = p.SourceEnv;
+            SourceDatabase = p.SourceDatabase;
+        }
+        finally { _suspendRebuild = false; }
+
+        RefreshProfiles();
+        RebuildTargets();
+
+        var keys = new HashSet<string>(
+            p.TargetKeys ?? Enumerable.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var t in Targets) t.IsChecked = keys.Contains(t.Key);
+    }
 
     private void RefreshProfiles()
     {
@@ -96,6 +230,9 @@ public sealed partial class SyncViewModel : ObservableObject
     private void RebuildTargets()
     {
         var previouslyChecked = Targets.Where(t => t.IsChecked).Select(t => t.Key).ToHashSet();
+
+        // Detach the IsChecked listener before clearing so we don't leak.
+        foreach (var t in Targets) t.PropertyChanged -= OnTargetPropertyChanged;
         Targets.Clear();
 
         foreach (var cfg in EnvironmentListProvider.VisibleConnections(_svc))
@@ -106,8 +243,149 @@ public sealed partial class SyncViewModel : ObservableObject
 
             var pick = TargetPickVm.From(_svc, cfg.Environment, cfg.Database,
                 isChecked: previouslyChecked.Contains($"{cfg.Environment?.ToUpperInvariant()}|{cfg.Database?.ToUpperInvariant()}"));
+            pick.PropertyChanged += OnTargetPropertyChanged;
             Targets.Add(pick);
         }
+        RebuildFilteredTargets();
+        NotifyTargetCounts();
+    }
+
+    private void OnTargetPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(TargetPickVm.IsChecked))
+            NotifyTargetCounts();
+    }
+
+    partial void OnTargetFilterChanged(string value) => RebuildFilteredTargets();
+
+    private void RebuildFilteredTargets()
+    {
+        FilteredTargets.Clear();
+        var f = (TargetFilter ?? "").Trim();
+        foreach (var t in Targets)
+            if (string.IsNullOrEmpty(f) || TargetMatches(t, f))
+                FilteredTargets.Add(t);
+    }
+
+    private static bool TargetMatches(TargetPickVm t, string filter) =>
+        t.Label.Contains(filter, StringComparison.OrdinalIgnoreCase)
+        || t.Environment.Contains(filter, StringComparison.OrdinalIgnoreCase)
+        || t.Database.Contains(filter, StringComparison.OrdinalIgnoreCase);
+
+    private void NotifyTargetCounts()
+    {
+        OnPropertyChanged(nameof(CanSwap));
+        OnPropertyChanged(nameof(TargetSelectedCount));
+        OnPropertyChanged(nameof(TargetTotalCount));
+    }
+
+    /// <summary>Tick every target currently visible in <see cref="FilteredTargets"/>. Filtered-out chips are left alone.</summary>
+    [RelayCommand]
+    private void SelectAllVisibleTargets()
+    {
+        foreach (var t in FilteredTargets) t.IsChecked = true;
+    }
+
+    /// <summary>Untick every target — including filtered-out ones — so the user has a single clean reset action.</summary>
+    [RelayCommand]
+    private void ClearTargets()
+    {
+        foreach (var t in Targets) t.IsChecked = false;
+    }
+
+    /// <summary>Save current source + ticked target state as a new profile, prompting for a name.</summary>
+    [RelayCommand]
+    private async Task SaveAsProfileAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SourceEnv) || string.IsNullOrWhiteSpace(SourceDatabase))
+        {
+            _svc.Toasts.Warning("Pick a source first", "Pick a source endpoint before saving a profile.");
+            return;
+        }
+
+        var name = await PromptDialog.AskAsync(
+            title:        "Save profile",
+            message:      "Name this source/target combination so you can pick it again with one click.",
+            initialValue: SuggestProfileName(),
+            watermark:    "e.g. Portal: DEV → PROD",
+            primaryText:  "Save");
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        var existing = _svc.AppSettings.Profiles
+            .FirstOrDefault(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+        {
+            var ok = await ConfirmDialog.AskAsync(
+                "Replace profile?",
+                $"A profile named '{name}' already exists. Overwrite it?",
+                primaryText: "Replace");
+            if (!ok) return;
+        }
+
+        var profile = new EndpointProfile
+        {
+            Id             = existing?.Id ?? Guid.NewGuid().ToString("N"),
+            Name           = name!,
+            SourceEnv      = SourceEnv!,
+            SourceDatabase = SourceDatabase!,
+            TargetKeys     = Targets.Where(t => t.IsChecked).Select(t => t.Key).ToList(),
+        };
+        _svc.AppSettings.UpsertProfile(profile);
+        ReloadProfiles();
+        SelectedProfile = Profiles.FirstOrDefault(p => p.Id == profile.Id);
+        _svc.Toasts.Success("Profile saved", $"'{name}' is now in your profile list.");
+    }
+
+    [RelayCommand]
+    private async Task DeleteProfileAsync()
+    {
+        var p = SelectedProfile;
+        if (p is null) return;
+        var ok = await ConfirmDialog.AskAsync(
+            "Delete profile?",
+            $"Delete the profile '{p.Name}'? This won't affect your connections or saved data.");
+        if (!ok) return;
+        _svc.AppSettings.RemoveProfile(p.Id);
+        SelectedProfile = null;
+        ReloadProfiles();
+        _svc.Toasts.Info("Profile deleted", $"'{p.Name}' was removed.");
+    }
+
+    /// <summary>
+    /// Swap source with the (single) ticked target. Disabled unless exactly
+    /// one target is ticked — the operation has no obvious meaning otherwise.
+    /// </summary>
+    [RelayCommand]
+    private void Swap()
+    {
+        if (!CanSwap) return;
+        var t = Targets.First(x => x.IsChecked);
+        var oldEnv = SourceEnv;
+        var oldDb  = SourceDatabase;
+
+        _suspendRebuild = true;
+        try
+        {
+            SourceEnv      = t.Environment;
+            SourceDatabase = t.Database;
+        }
+        finally { _suspendRebuild = false; }
+        RefreshProfiles();
+        RebuildTargets();
+
+        // Re-check the chip that matches the old source — that's the new target.
+        var newKey = $"{oldEnv?.ToUpperInvariant()}|{oldDb?.ToUpperInvariant()}";
+        foreach (var x in Targets) x.IsChecked = x.Key == newKey;
+        SyncSelectedEndpoint();
+    }
+
+    private string SuggestProfileName()
+    {
+        var src = $"{SourceEnv}/{SourceDatabase}";
+        var first = Targets.FirstOrDefault(t => t.IsChecked);
+        return first is null
+            ? src
+            : $"{SourceDatabase}: {SourceEnv} → {first.Environment}";
     }
 
     [RelayCommand]

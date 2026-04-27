@@ -10,49 +10,108 @@
              IsBusy is false so it takes no vertical space. -->
         <ProgressBar DockPanel.Dock="Top" Classes="pageLoader" IsVisible="{Binding IsBusy}"/>
 
-    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+    <Grid RowDefinitions="Auto,Auto,Auto,Auto,*,Auto">
 
-        <!-- Row 0: source (env / db)  ·  object name  ·  actions  ·  source badge -->
+        <!-- Row 0: Profile bar — saved (source, targets) tuples. Picking
+             one applies source + ticks the right target chips in one shot.
+             Save / Delete operate on the user's profile list. Swap is
+             enabled only when exactly one target is ticked. -->
         <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Profile" VerticalAlignment="Center"
+                           Margin="0,0,8,0" FontSize="12" Opacity="0.7"/>
+                <ComboBox Grid.Column="1" Width="260"
+                          ItemsSource="{Binding Profiles}"
+                          SelectedItem="{Binding SelectedProfile}"
+                          PlaceholderText="None — pick a saved pair">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate DataType="vm:EndpointProfile">
+                            <TextBlock Text="{Binding Name}"/>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <Button   Grid.Column="2" Margin="6,0,0,0" Content="Save as profile…"
+                          Command="{Binding SaveAsProfileCommand}"
+                          ToolTip.Tip="Save the current source + ticked targets as a reusable profile."/>
+                <Button   Grid.Column="3" Margin="4,0,0,0" Content="Delete"
+                          Command="{Binding DeleteProfileCommand}"
+                          IsEnabled="{Binding SelectedProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
+                          ToolTip.Tip="Delete the selected profile. Connections aren't affected."/>
+                <!-- spacer @ col 4 -->
+                <Button   Grid.Column="5" Content="⇄ Swap"
+                          Command="{Binding SwapCommand}"
+                          IsEnabled="{Binding CanSwap}"
+                          ToolTip.Tip="Swap source with the single ticked target. Enabled only when exactly one target is ticked."/>
+            </Grid>
+        </Border>
+
+        <!-- Row 1: source (one searchable picker)  ·  object name  ·  actions  ·  source badge -->
+        <Border Grid.Row="1" Classes="toolbar" Margin="0,0,0,6">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
                 <TextBlock Grid.Column="0" Text="Source" VerticalAlignment="Center"
                            Margin="0,0,8,0" FontSize="12" Opacity="0.7"/>
-                <ComboBox Grid.Column="1" Width="110"
-                          ItemsSource="{Binding Environments}" SelectedItem="{Binding SourceEnv}"
-                          PlaceholderText="Environment"/>
-                <TextBlock Grid.Column="2" Text="/" VerticalAlignment="Center"
-                           Margin="6,0,6,0" Opacity="0.5"/>
-                <ComboBox Grid.Column="3" Width="150"
-                          ItemsSource="{Binding Databases}" SelectedItem="{Binding SourceDatabase}"
-                          PlaceholderText="Database"/>
-                <TextBox Grid.Column="4" Width="260" Margin="12,0,0,0"
+                <AutoCompleteBox Grid.Column="1" x:Name="SourceBox" MinWidth="280"
+                                 ItemsSource="{Binding Endpoints}"
+                                 SelectedItem="{Binding SelectedSourceEndpoint, Mode=TwoWay}"
+                                 Watermark="Type to filter — name, ENV or database">
+                    <AutoCompleteBox.ItemTemplate>
+                        <DataTemplate DataType="vm:EndpointPick">
+                            <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                                <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
+                                         Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                         Margin="0,0,8,0"/>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="{Binding Label}" FontSize="12"/>
+                                    <TextBlock Text="{Binding SubLabel}"
+                                               FontSize="10" Opacity="0.55"
+                                               IsVisible="{Binding ShowSubLabel}"/>
+                                </StackPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </AutoCompleteBox.ItemTemplate>
+                </AutoCompleteBox>
+                <Border Grid.Column="2" Classes="badge"
+                        Background="{Binding SourceProfile.Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                        IsVisible="{Binding SourceProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
+                        VerticalAlignment="Center" Margin="8,0,0,0">
+                    <TextBlock Text="{Binding SourceProfile.Label}"/>
+                </Border>
+                <TextBox Grid.Column="3" Width="260" Margin="12,0,0,0"
                          Text="{Binding ObjectName}" Watermark="dbo.usp_Something"/>
+                <!-- flex spacer @ col 4 -->
                 <Button  Grid.Column="5" Margin="8,0,0,0" MinWidth="72" Content="Backup"
                          Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
                          ToolTip.Tip="Capture source + every ticked target without altering anything."/>
                 <Button  Grid.Column="6" Margin="4,0,0,0" MinWidth="72" Content="Sync" Classes="accent"
                          Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
-                <!-- flex spacer at col 7 -->
-                <Border  Grid.Column="8" Classes="badge"
-                         Background="{Binding SourceProfile.Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
-                         IsVisible="{Binding SourceProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
-                         VerticalAlignment="Center" Margin="12,0,0,0">
-                    <TextBlock Text="{Binding SourceProfile.Label}"/>
-                </Border>
             </Grid>
         </Border>
 
-        <!-- Row 1: target chips. Each target is a pill-shaped ToggleButton
-             — unchecked = outlined, checked = filled accent. No nested
-             border; chips sit directly in the toolbar row for a tight
-             compact look. -->
-        <Border Grid.Row="1" Classes="toolbar" Margin="0,0,0,6">
-            <Grid ColumnDefinitions="Auto,*">
-                <TextBlock Grid.Column="0" Text="Targets" VerticalAlignment="Center"
-                           Margin="0,0,10,0" FontSize="12" Opacity="0.7"/>
-                <ScrollViewer Grid.Column="1"
-                              HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding Targets}">
+        <!-- Row 2: target chips with a filter / select-all / clear bar
+             above the wrap. The wrap binds to FilteredTargets so a 50+
+             connection group is still navigable — type a fragment to
+             narrow, then 'Select all visible' to bulk-tick. Clear unticks
+             everything regardless of filter. -->
+        <Border Grid.Row="2" Classes="toolbar" Margin="0,0,0,6">
+            <StackPanel Spacing="6">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                    <TextBlock Grid.Column="0" Text="Targets" VerticalAlignment="Center"
+                               Margin="0,0,10,0" FontSize="12" Opacity="0.7"/>
+                    <TextBox  Grid.Column="1" Width="220" MinHeight="28"
+                              Text="{Binding TargetFilter, Mode=TwoWay}"
+                              Watermark="Filter — name, ENV or database"/>
+                    <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="12,0,12,0"
+                               FontSize="11" Opacity="0.55"
+                               Text="{Binding TargetSelectedCount, StringFormat='{}{0} selected'}"/>
+                    <Button   Grid.Column="3" Content="Select all visible"
+                              Command="{Binding SelectAllVisibleTargetsCommand}"
+                              ToolTip.Tip="Tick every target currently shown by the filter."/>
+                    <Button   Grid.Column="4" Margin="4,0,0,0" Content="Clear"
+                              Command="{Binding ClearTargetsCommand}"
+                              ToolTip.Tip="Untick every target — even ones hidden by the filter."/>
+                </Grid>
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                    <ItemsControl ItemsSource="{Binding FilteredTargets}">
                         <ItemsControl.ItemsPanel>
                             <ItemsPanelTemplate>
                                 <WrapPanel Orientation="Horizontal"/>
@@ -67,13 +126,12 @@
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>
                 </ScrollViewer>
-            </Grid>
+            </StackPanel>
         </Border>
 
-        <!-- Row 2: DACPAC per-run opt-in. Hidden entirely when DACPAC
-             isn't configured in Settings — the checkbox is only useful
-             when the tree + branch-prefix are set up. -->
-        <Border Grid.Row="2" Classes="toolbar" Margin="0,0,0,6"
+        <!-- Row 3: DACPAC per-run opt-in. Hidden entirely when DACPAC
+             isn't configured in Settings. -->
+        <Border Grid.Row="3" Classes="toolbar" Margin="0,0,0,6"
                 IsVisible="{Binding DacpacConfigured}">
             <Grid ColumnDefinitions="Auto,*,Auto">
                 <CheckBox Grid.Column="0" Content="Write to DACPAC folder"
@@ -85,8 +143,8 @@
             </Grid>
         </Border>
 
-        <!-- Row 3: last-run info card -->
-        <Border Grid.Row="3" Classes="card">
+        <!-- Row 4: last-run info card -->
+        <Border Grid.Row="4" Classes="card">
             <StackPanel Spacing="10">
                 <StackPanel>
                     <TextBlock Classes="sectionTitle" Text="Last run"/>
@@ -106,7 +164,7 @@
             </StackPanel>
         </Border>
 
-        <Border Grid.Row="4" Classes="pageStatus">
+        <Border Grid.Row="5" Classes="pageStatus">
             <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
         </Border>
     </Grid>

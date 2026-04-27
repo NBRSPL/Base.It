@@ -1,6 +1,8 @@
+using System;
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
+using Avalonia.Interactivity;
 using Base.It.App.ViewModels;
 
 namespace Base.It.App.Views;
@@ -27,7 +29,7 @@ public partial class SettingsView : UserControl
     }
 
     /// <summary>Commit the inline rename on blur.</summary>
-    private void OnGroupNameCommit(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnGroupNameCommit(object? sender, RoutedEventArgs e)
         => CommitInlineRename(sender);
 
     /// <summary>Commit on Enter; revert on Escape.</summary>
@@ -57,41 +59,25 @@ public partial class SettingsView : UserControl
         _ = vm.RenameGroupFromTreeAsync(node.GroupId, node.GroupName);
     }
 
-    /// <summary>
-    /// "+" on a group header — routes to the VM's
-    /// <see cref="SettingsViewModel.AddConnectionToGroupCommand"/> with the
-    /// group id stashed in the button's Tag.
-    /// </summary>
-    private void OnAddConnectionToGroup(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnAddConnectionToGroup(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button btn) return;
-        if (btn.Tag is not System.Guid id) return;
+        if (btn.Tag is not Guid id) return;
         if (DataContext is not SettingsViewModel vm) return;
-        // Stop the click from also toggling the Expander header.
         e.Handled = true;
         vm.AddConnectionToGroupCommand.Execute(id);
     }
 
-    /// <summary>
-    /// "✕" on a group header — routes to the VM's
-    /// <see cref="SettingsViewModel.DeleteGroupCommand"/> (which itself
-    /// prompts for confirmation) with the group id from the button Tag.
-    /// </summary>
-    private void OnDeleteGroup(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnDeleteGroup(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button btn) return;
-        if (btn.Tag is not System.Guid id) return;
+        if (btn.Tag is not Guid id) return;
         if (DataContext is not SettingsViewModel vm) return;
         e.Handled = true;
         vm.DeleteGroupCommand.Execute(id);
     }
 
-    /// <summary>
-    /// "−" on a connection row — routes to the VM's
-    /// <see cref="SettingsViewModel.DeleteConnectionCommand"/> with the row
-    /// from the button's DataContext (the row template inherits it).
-    /// </summary>
-    private void OnDeleteConnection(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    private void OnDeleteConnection(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button btn) return;
         if (btn.DataContext is not ConnectionRow row) return;

@@ -145,20 +145,35 @@ public sealed partial class ConnectionMembershipVm : ObservableObject
 /// Expandable, selectable. Connections in multiple groups appear under
 /// each group they belong to — identity is the underlying
 /// <see cref="ConnectionRow"/> (same instance everywhere).
+///
+/// <para><see cref="SelectedInGroup"/> is the per-node selection that the
+/// view's ListBox binds to. Each node owns its own selection property so
+/// sibling ListBoxes never fight over a shared <c>Selected</c> setter.
+/// The optional <see cref="OnSelectionChanged"/> callback lets the
+/// parent <see cref="SettingsViewModel"/> coordinate: when one node's
+/// selection becomes non-null, the parent clears every other node and
+/// sets <see cref="SettingsViewModel.Selected"/>.</para>
 /// </summary>
 public sealed partial class ConnectionGroupNodeVm : ObservableObject
 {
     public Guid    GroupId { get; }
     [ObservableProperty] private string _groupName = "";
     [ObservableProperty] private bool   _isExpanded = true;
+    [ObservableProperty] private ConnectionRow? _selectedInGroup;
 
     public ObservableCollection<ConnectionRow> Connections { get; } = new();
+
+    /// <summary>Invoked whenever <see cref="SelectedInGroup"/> changes (including null transitions).</summary>
+    public Action<ConnectionGroupNodeVm, ConnectionRow?>? OnSelectionChanged { get; set; }
 
     public ConnectionGroupNodeVm(ConnectionGroup group)
     {
         GroupId   = group.Id;
         _groupName = group.Name;
     }
+
+    partial void OnSelectedInGroupChanged(ConnectionRow? value)
+        => OnSelectionChanged?.Invoke(this, value);
 }
 
 public sealed partial class SettingsViewModel : ObservableObject
@@ -184,6 +199,58 @@ public sealed partial class SettingsViewModel : ObservableObject
     partial void OnSelectedChanged(ConnectionRow? value)
     {
         if (value is not null) IsConnectionEditorExpanded = true;
+        MirrorSelectedToGroupNodes(value);
+    }
+
+    /// <summary>
+    /// Re-entrancy guard for the parent ↔ node selection bridge. Set to
+    /// true while we're propagating the selection in either direction so
+    /// the partial OnXxxChanged hooks don't loop.
+    /// </summary>
+    private bool _suppressGroupSelection;
+
+    /// <summary>
+    /// Push <see cref="Selected"/> into the matching group node's
+    /// <see cref="ConnectionGroupNodeVm.SelectedInGroup"/> so the right
+    /// ListBox visually reflects the selection. Every other node is
+    /// cleared so we never have two highlighted rows.
+    /// </summary>
+    private void MirrorSelectedToGroupNodes(ConnectionRow? row)
+    {
+        if (_suppressGroupSelection) return;
+        _suppressGroupSelection = true;
+        try
+        {
+            foreach (var node in GroupNodes)
+            {
+                var match = row is not null && node.Connections.Contains(row);
+                node.SelectedInGroup = match ? row : null;
+            }
+        }
+        finally { _suppressGroupSelection = false; }
+    }
+
+    /// <summary>
+    /// Wired into every node's <see cref="ConnectionGroupNodeVm.OnSelectionChanged"/>
+    /// hook by <see cref="RebuildGroupNodes"/>. When one node lights up,
+    /// every other node is cleared and <see cref="Selected"/> mirrors the
+    /// pick. Null assignments here are induced by us clearing siblings —
+    /// they must NOT flip <see cref="Selected"/> back to null.
+    /// </summary>
+    private void OnGroupNodeSelectionChanged(ConnectionGroupNodeVm caller, ConnectionRow? row)
+    {
+        if (_suppressGroupSelection) return;
+        if (row is null) return;
+
+        _suppressGroupSelection = true;
+        try
+        {
+            foreach (var node in GroupNodes)
+                if (!ReferenceEquals(node, caller))
+                    node.SelectedInGroup = null;
+            Selected = row;
+        }
+        finally { _suppressGroupSelection = false; }
     }
 
     // ---- Connection groups -------------------------------------------------
@@ -489,7 +556,8 @@ public sealed partial class SettingsViewModel : ObservableObject
         {
             var node = new ConnectionGroupNodeVm(g)
             {
-                IsExpanded = wasExpanded.TryGetValue(g.Id, out var exp) ? exp : true
+                IsExpanded = wasExpanded.TryGetValue(g.Id, out var exp) ? exp : true,
+                OnSelectionChanged = OnGroupNodeSelectionChanged,
             };
             var keySet = new HashSet<string>(g.ConnectionKeys, StringComparer.Ordinal);
             foreach (var row in Rows)
@@ -502,6 +570,10 @@ public sealed partial class SettingsViewModel : ObservableObject
             }
             GroupNodes.Add(node);
         }
+
+        // Re-mirror current Selected so the freshly-built node owning it
+        // lights up and every other node is clean.
+        MirrorSelectedToGroupNodes(Selected);
     }
 
     /// <summary>
@@ -853,19 +925,43 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// the trash icon inline on each tree row. Persists the connection store
     /// immediately (unlike the bulk −Conn button, which defers to Save all)
     /// so the row doesn't silently reappear on reload.
+    ///
+    /// Unsaved rows — those that were just added but have an empty env/db
+    /// or whose (env, db) pair isn't yet in the persisted store — are
+    /// discarded silently. Confirming "remove '/' ?" is a worse UX than
+    /// just letting the user discard a half-typed row.
     /// </summary>
     [RelayCommand]
     private async Task DeleteConnectionAsync(ConnectionRow? row)
     {
         if (row is null) return;
-        var ok = await ConfirmDialog.AskAsync(
-            "Delete connection?",
-            $"Remove '{row.Label}' ({row.Environment}/{row.Database})? It'll be dropped from every group. Backups already on disk are kept.",
-            primaryText: "Delete");
-        if (!ok) return;
+
+        var isUnsaved =
+            string.IsNullOrWhiteSpace(row.Environment) ||
+            string.IsNullOrWhiteSpace(row.Database) ||
+            !_svc.Connections.Load().Any(c =>
+                string.Equals(c.Environment, row.Environment, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(c.Database,    row.Database,    StringComparison.OrdinalIgnoreCase));
+
+        if (!isUnsaved)
+        {
+            var ok = await ConfirmDialog.AskAsync(
+                "Delete connection?",
+                $"Remove '{row.Label}' ({row.Environment}/{row.Database})? It'll be dropped from every group. Backups already on disk are kept.",
+                primaryText: "Delete");
+            if (!ok) return;
+        }
 
         Rows.Remove(row);
         if (ReferenceEquals(Selected, row)) Selected = Rows.FirstOrDefault();
+
+        if (isUnsaved)
+        {
+            // In-memory only — nothing to persist, nothing to reconcile.
+            RebuildGroupNodes();
+            Status = "Discarded the unsaved connection.";
+            return;
+        }
 
         // Persist immediately so reload doesn't resurrect the row.
         try
