@@ -69,7 +69,18 @@ $csproj = [Regex]::Replace($csproj, '<AssemblyVersion>[^<]+</AssemblyVersion>', 
 $csproj = [Regex]::Replace($csproj, '<FileVersion>[^<]+</FileVersion>',         "<FileVersion>$Version.0</FileVersion>")
 [System.IO.File]::WriteAllText($project, $csproj, $utf8NoBom)
 
-# --- Publish (single-file self-contained) -----------------------------
+# --- Publish (folder layout, self-contained) --------------------------
+# Folder publish (NOT single-file) is what makes Velopack delta updates
+# tiny. Single-file + compression bundles every dependency into one big
+# compressed exe; binary-diffing that monolith between versions cascades
+# small input changes into huge output deltas (v1.0.0 -> v1.0.1 was
+# 58 MB for a 3-file change). With a folder of DLLs each assembly is
+# diffed independently - unchanged Avalonia / SqlClient / runtime DLLs
+# are skipped entirely and only your changed DLLs ship.
+#
+# Tradeoff: install layout is a folder of files instead of one .exe.
+# End-user experience is identical (Setup.exe still produces a single
+# Start Menu shortcut). ReadyToRun is kept for fast startup.
 if (Test-Path $publishDir) { Remove-Item -Recurse -Force $publishDir }
 
 Write-Host "Publishing Base.It to $publishDir ..."
@@ -77,9 +88,6 @@ Write-Host "Publishing Base.It to $publishDir ..."
     -c Release `
     -r win-x64 `
     --self-contained true `
-    -p:PublishSingleFile=true `
-    -p:IncludeNativeLibrariesForSelfExtract=true `
-    -p:EnableCompressionInSingleFile=true `
     -p:PublishReadyToRun=true `
     -p:DebugType=None `
     -p:DebugSymbols=false `

@@ -16,9 +16,9 @@
     <!-- Publish / EXE metadata. Update Version + FileVersion on each
          release - the exe properties dialog and the Win32 about box
          surface these to end users. -->
-    <Version>1.0.1</Version>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
+    <Version>1.0.2</Version>
+    <AssemblyVersion>1.0.2.0</AssemblyVersion>
+    <FileVersion>1.0.2.0</FileVersion>
     <Product>Base.It</Product>
     <Company>L2 Brands</Company>
     <Description>SQL database synchronization and drift-watch tool.</Description>
