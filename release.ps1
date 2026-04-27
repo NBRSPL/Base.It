@@ -44,6 +44,12 @@ $publishDir = Join-Path $scriptRoot 'publish'
 $releasesDir = Join-Path $scriptRoot 'Releases'
 $project = Join-Path $scriptRoot 'Base.It.App\Base.It.App.csproj'
 
+# Pin CWD to the repo root. Otherwise `vpk upload github` (which has no
+# explicit -o flag) looks for assets.win.json in whatever directory the
+# script was invoked from - if that's a worktree subfolder, the upload
+# 404s on its own pack output. Happened on the v1.0.1 cut.
+Set-Location -Path $scriptRoot
+
 # --- Validate inputs ---------------------------------------------------
 if (-not $DryRun -and [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
     Write-Host "GITHUB_TOKEN env var not set. Create a PAT with 'repo' scope and:" -ForegroundColor Red
