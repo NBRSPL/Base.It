@@ -30,6 +30,8 @@ public class ChangeWatcherTests : IDisposable
         }
         public Task<SqlObject?> GetObjectForDacpacAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
             => GetObjectAsync(conn, id, ct);
+        public Task<ObjectIdentifier?> GetTriggerParentAsync(string conn, ObjectIdentifier triggerId, CancellationToken ct = default)
+            => Task.FromResult<ObjectIdentifier?>(null);
         // Tests don't exercise discovery; return an empty list.
         public Task<IReadOnlyList<SqlObjectRef>> ListAllAsync(string conn, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<SqlObjectRef>>(Array.Empty<SqlObjectRef>());

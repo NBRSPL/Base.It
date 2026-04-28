@@ -39,6 +39,9 @@ public class DriftDetectorTests
         public Task<SqlObject?> GetObjectForDacpacAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
             => GetObjectAsync(conn, id, ct);
 
+        public Task<ObjectIdentifier?> GetTriggerParentAsync(string conn, ObjectIdentifier triggerId, CancellationToken ct = default)
+            => Task.FromResult<ObjectIdentifier?>(null);
+
         public Task<IReadOnlyList<SqlObjectRef>> ListAllAsync(string conn, CancellationToken ct = default)
         {
             var refs = _world
@@ -172,6 +175,9 @@ public class DriftDetectorTests
         public Task<SqlObject?> GetObjectForDacpacAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
             => GetObjectAsync(conn, id, ct);
 
+        public Task<ObjectIdentifier?> GetTriggerParentAsync(string conn, ObjectIdentifier triggerId, CancellationToken ct = default)
+            => Task.FromResult<ObjectIdentifier?>(null);
+
         public Task<SqlObjectType> GetObjectTypeAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
             => Task.FromResult(SqlObjectType.StoredProcedure);
 
@@ -217,6 +223,9 @@ public class DriftDetectorTests
 
         public Task<SqlObject?> GetObjectForDacpacAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
             => GetObjectAsync(conn, id, ct);
+
+        public Task<ObjectIdentifier?> GetTriggerParentAsync(string conn, ObjectIdentifier triggerId, CancellationToken ct = default)
+            => Task.FromResult<ObjectIdentifier?>(null);
 
         public Task<SqlObjectType> GetObjectTypeAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
             => Task.FromResult(SqlObjectType.StoredProcedure);

@@ -628,22 +628,20 @@ public sealed partial class BatchViewModel : ObservableObject
                     {
                         try
                         {
-                            // DACPAC path: rich table script for SSDT output.
-                            var src = await _svc.Scripter.GetObjectForDacpacAsync(srcConn!, id);
-                            if (src is not null)
+                            // Routed through AppServices so the trigger-
+                            // inline policy stays in one place. The result
+                            // tuple's ExistedBefore flag preserves the
+                            // "updated" vs "created (new)" log distinction
+                            // even when a trigger ends up writing to its
+                            // parent table's file.
+                            var result = await _svc.ExportToDacpacAsync(exporter, srcConn!, id);
+                            if (result.Path is not null)
                             {
-                                var preRel = exporter.RelativePathFor(id, src.Type);
-                                var existedBefore = File.Exists(
-                                    Path.Combine(exporter.Options.RootFolder, preRel));
-                                var path = exporter.Export(id, src.Type, src.Definition);
-                                if (path is not null)
-                                {
-                                    exportedPaths.Add(path);
-                                    var rel = Path.GetRelativePath(exporter.Options.RootFolder, path);
-                                    perTargetMsgs.Add(existedBefore
-                                        ? $"[DACPAC] updated {rel}"
-                                        : $"[DACPAC] created (new) {rel}");
-                                }
+                                exportedPaths.Add(result.Path);
+                                var rel = Path.GetRelativePath(exporter.Options.RootFolder, result.Path);
+                                perTargetMsgs.Add(result.ExistedBefore
+                                    ? $"[DACPAC] updated {rel}"
+                                    : $"[DACPAC] created (new) {rel}");
                             }
                         }
                         catch (Exception ex)

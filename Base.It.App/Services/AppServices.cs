@@ -223,6 +223,58 @@ public sealed class AppServices
         return opts.IsUsable ? new DacpacExporter(opts) : null;
     }
 
+    /// <summary>
+    /// Result of a single DACPAC export step.
+    /// <see cref="Path"/> is the absolute file actually written (or null
+    /// when nothing was exported). <see cref="ExistedBefore"/> tells the
+    /// caller whether that file pre-existed in the SSDT tree, so it can
+    /// distinguish "updated" from "created (new)" in run logs without
+    /// re-querying the filesystem after the write.
+    /// </summary>
+    public readonly record struct DacpacExportResult(string? Path, bool ExistedBefore);
+
+    /// <summary>
+    /// Centralised DACPAC export step shared by Sync, Batch and Watch.
+    /// Fetches the object's DACPAC-shaped definition and routes it to the
+    /// right SSDT file. The trigger-inline policy lives here: when a
+    /// trigger has no existing standalone file in the SSDT tree, its
+    /// definition is folded into the parent table's file (re-emitting the
+    /// table's full DACPAC script, which already inlines every bound
+    /// trigger). Existing standalone trigger files keep being updated in
+    /// place so a team's chosen layout isn't disturbed.
+    /// </summary>
+    public async Task<DacpacExportResult> ExportToDacpacAsync(
+        DacpacExporter exporter,
+        string connectionString,
+        Base.It.Core.Models.ObjectIdentifier id,
+        CancellationToken ct = default)
+    {
+        var src = await Scripter.GetObjectForDacpacAsync(connectionString, id, ct);
+        if (src is null) return new DacpacExportResult(null, false);
+
+        if (src.Type == Base.It.Core.Models.SqlObjectType.Trigger
+            && !exporter.HasExistingFile(id))
+        {
+            var parent = await Scripter.GetTriggerParentAsync(connectionString, id, ct);
+            if (parent is not null)
+            {
+                var parentObj = await Scripter.GetObjectForDacpacAsync(connectionString, parent.Value, ct);
+                if (parentObj is not null)
+                {
+                    var existed = exporter.HasExistingFile(parent.Value);
+                    var path    = exporter.Export(parentObj.Id, parentObj.Type, parentObj.Definition);
+                    return new DacpacExportResult(path, existed);
+                }
+            }
+            // Parent lookup failed — fall through to write the trigger as
+            // its own file rather than dropping the export entirely.
+        }
+
+        var existedSrc = exporter.HasExistingFile(src.Id);
+        var pathSrc    = exporter.Export(src.Id, src.Type, src.Definition);
+        return new DacpacExportResult(pathSrc, existedSrc);
+    }
+
     public ChangeWatcher CreateWatcher(
         TimeSpan interval,
         Func<CancellationToken, Task<WatchPlan?>> planSupplier,

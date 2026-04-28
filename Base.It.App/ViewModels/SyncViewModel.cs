@@ -469,16 +469,16 @@ public sealed partial class SyncViewModel : ObservableObject
             {
                 try
                 {
-                    // DACPAC path: rich table script for SSDT output.
-                    var src = await _svc.Scripter.GetObjectForDacpacAsync(srcConn!, id);
-                    if (src is not null)
+                    // Routed through AppServices so the trigger-inline
+                    // policy stays in one place: a trigger with no
+                    // existing standalone file in the SSDT tree gets
+                    // folded into its parent table's file instead of
+                    // creating Triggers2/.
+                    var result = await _svc.ExportToDacpacAsync(exporter, srcConn!, id);
+                    if (result.Path is not null)
                     {
-                        var path = exporter.Export(src.Id, src.Type, src.Definition);
-                        if (path is not null)
-                        {
-                            exportedPaths.Add(path);
-                            parts.Add($"[DACPAC] {System.IO.Path.GetRelativePath(exporter.Options.RootFolder, path)}");
-                        }
+                        exportedPaths.Add(result.Path);
+                        parts.Add($"[DACPAC] {System.IO.Path.GetRelativePath(exporter.Options.RootFolder, result.Path)}");
                     }
                 }
                 catch (Exception ex) { parts.Add($"[DACPAC] export failed: {ex.Message}"); }

@@ -34,6 +34,18 @@ public interface IObjectScripter
         CancellationToken ct = default);
 
     /// <summary>
+    /// For a trigger identifier, returns the (schema, name) of its parent
+    /// table. Used by the DACPAC export step to embed a trigger inside
+    /// its parent table's file when no separate trigger file already
+    /// exists in the SSDT tree. Returns <c>null</c> when the identifier
+    /// doesn't resolve to a trigger or its parent isn't a user table.
+    /// </summary>
+    Task<ObjectIdentifier?> GetTriggerParentAsync(
+        string connectionString,
+        ObjectIdentifier triggerId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Lists every user-authored syncable object in the database behind
     /// <paramref name="connectionString"/>: procedures, functions, views,
     /// tables, and triggers. Used by the Watch pane when a group doesn't

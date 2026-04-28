@@ -458,20 +458,15 @@ public sealed partial class WatchViewModel : ObservableObject
         {
             try
             {
-                var id  = new ObjectIdentifier("dbo", row.ObjectName);
-                // DACPAC path: pull the rich table script (constraints,
-                // FKs, non-PK indexes, triggers) when writing into SSDT.
-                var src = await _svc.Scripter.GetObjectForDacpacAsync(srcConn!, id);
-                if (src is null) continue;
-
-                var preExisting = exporter.RelativePathFor(src.Id, src.Type);
-                var existedBefore = System.IO.File.Exists(
-                    System.IO.Path.Combine(exporter.Options.RootFolder, preExisting));
-                var path = exporter.Export(src.Id, src.Type, src.Definition);
-                if (path is not null)
+                var id = new ObjectIdentifier("dbo", row.ObjectName);
+                // Routed through AppServices so the trigger-inline policy
+                // (embed the trigger in its parent table's file when no
+                // standalone trigger file exists) stays in one place.
+                var result = await _svc.ExportToDacpacAsync(exporter, srcConn!, id);
+                if (result.Path is not null)
                 {
-                    exported.Add(path);
-                    if (!existedBefore) newlyCreated++;
+                    exported.Add(result.Path);
+                    if (!result.ExistedBefore) newlyCreated++;
                 }
             }
             catch { /* best-effort */ }

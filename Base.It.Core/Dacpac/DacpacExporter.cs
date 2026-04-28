@@ -60,6 +60,21 @@ public sealed class DacpacExporter
     }
 
     /// <summary>
+    /// Returns true if the SSDT tree already contains a <c>.sql</c> file
+    /// for this object. Used by the trigger-inline policy in the DACPAC
+    /// export step: when a trigger has no existing file, its definition
+    /// is embedded in the parent table's file rather than written to a
+    /// new <c>Triggers2/</c> file. Returns false when the exporter is
+    /// disabled / unusable (no SSDT root configured).
+    /// </summary>
+    public bool HasExistingFile(ObjectIdentifier id)
+    {
+        if (!_options.IsUsable) return false;
+        var fileName = Sanitize(id.Name) + ".sql";
+        return FindExistingFile(_options.RootFolder, id.Schema, fileName) is not null;
+    }
+
+    /// <summary>
     /// The relative path within <see cref="DacpacExportOptions.RootFolder"/>
     /// for an object — returns the existing file's path when one is found,
     /// otherwise the new-objects path.

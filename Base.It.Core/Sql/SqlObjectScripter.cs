@@ -39,7 +39,9 @@ WHERE o.name = @name
 
     // Rich column query: identity, defaults, computed, collation, rowguidcol.
     // LEFT JOINs mean a plain column returns nulls in the extra fields —
-    // the scripter branches on those.
+    // the scripter branches on those. ic.is_not_for_replication is what
+    // surfaces the "IDENTITY (..) NOT FOR REPLICATION" clause that SSMS
+    // emits and DACPAC otherwise dropped.
     private const string TableColumnsQuery = NonBlockingPreamble + @"
 SELECT
     c.column_id,
@@ -52,6 +54,7 @@ SELECT
     c.is_identity,
     CAST(ic.seed_value      AS BIGINT) AS identity_seed,
     CAST(ic.increment_value AS BIGINT) AS identity_increment,
+    ic.is_not_for_replication         AS identity_not_for_replication,
     cc.definition                     AS computed_definition,
     cc.is_persisted                   AS computed_is_persisted,
     dc.name                           AS default_name,
@@ -111,9 +114,10 @@ WHERE t.name = @name
 
     // Table- and column-level check constraints. parent_column_id = 0 for
     // table-scoped; we emit everything as a named CONSTRAINT line in the
-    // CREATE TABLE body so ordering is stable.
+    // CREATE TABLE body so ordering is stable. is_not_for_replication
+    // captures the "CHECK NOT FOR REPLICATION (..)" form.
     private const string TableCheckConstraintsQuery = NonBlockingPreamble + @"
-SELECT cc.name, cc.definition, cc.is_not_trusted
+SELECT cc.name, cc.definition, cc.is_not_trusted, cc.is_not_for_replication
 FROM sys.check_constraints cc
 INNER JOIN sys.tables t ON t.object_id = cc.parent_object_id
 WHERE t.name = @name
@@ -122,10 +126,13 @@ ORDER BY cc.name";
 
     // Foreign keys — emitted as ALTER TABLE ADD CONSTRAINT after CREATE
     // TABLE since the referenced table may not yet exist in deployment.
+    // is_not_for_replication captures the "FOREIGN KEY .. NOT FOR REPLICATION"
+    // form used to skip enforcement under replication agents.
     private const string TableForeignKeysQuery = NonBlockingPreamble + @"
 SELECT
     fk.name                              AS constraint_name,
     fk.is_not_trusted,
+    fk.is_not_for_replication,
     SCHEMA_NAME(ref_t.schema_id)         AS ref_schema,
     ref_t.name                           AS ref_table,
     fkc.constraint_column_id             AS ordinal,
@@ -263,6 +270,33 @@ ORDER BY schema_name, o.name";
 
         if (string.IsNullOrWhiteSpace(definition)) return null;
         return new SqlObject(id, type, definition, DefinitionHasher.Hash(definition));
+    }
+
+    /// <summary>
+    /// For a trigger, returns the (schema, name) of its parent table —
+    /// triggers in SQL Server are bound to a single object via
+    /// <c>sys.triggers.parent_id</c>. Returns <c>null</c> when the
+    /// identifier doesn't resolve to a trigger or the parent isn't a
+    /// table (e.g. database-level DDL triggers).
+    /// </summary>
+    public async Task<ObjectIdentifier?> GetTriggerParentAsync(
+        string connectionString, ObjectIdentifier triggerId, CancellationToken ct = default)
+    {
+        const string Q = NonBlockingPreamble + @"
+SELECT SCHEMA_NAME(t.schema_id) AS schema_name, t.name AS table_name
+FROM sys.triggers tr
+INNER JOIN sys.tables t ON t.object_id = tr.parent_id
+WHERE tr.name = @name
+  AND SCHEMA_NAME(t.schema_id) = @schema";
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(Q, conn);
+        cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = triggerId.Name;
+        cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = triggerId.Schema;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return null;
+        return new ObjectIdentifier(reader.GetString(0), reader.GetString(1));
     }
 
     private static async Task<string> GetModuleDefinitionAsync(
@@ -455,6 +489,7 @@ ORDER BY schema_name, o.name";
         bool   IsIdentity,
         long?  IdentitySeed,
         long?  IdentityIncrement,
+        bool   IdentityNotForReplication,
         string? ComputedDefinition,
         bool?  ComputedIsPersisted,
         string? DefaultName,
@@ -473,21 +508,22 @@ ORDER BY schema_name, o.name";
         while (await reader.ReadAsync(ct))
         {
             list.Add(new ColumnInfo(
-                Name:                 reader.GetString(reader.GetOrdinal("name")),
-                TypeName:             reader.GetString(reader.GetOrdinal("type_name")),
-                MaxLength:            reader.GetInt16 (reader.GetOrdinal("max_length")),
-                Precision:            reader.GetByte  (reader.GetOrdinal("precision")),
-                Scale:                reader.GetByte  (reader.GetOrdinal("scale")),
-                IsNullable:           reader.GetBoolean(reader.GetOrdinal("is_nullable")),
-                IsIdentity:           reader.GetBoolean(reader.GetOrdinal("is_identity")),
-                IdentitySeed:         SafeLong(reader, "identity_seed"),
-                IdentityIncrement:    SafeLong(reader, "identity_increment"),
-                ComputedDefinition:   SafeString(reader, "computed_definition"),
-                ComputedIsPersisted:  SafeBool(reader, "computed_is_persisted"),
-                DefaultName:          SafeString(reader, "default_name"),
-                DefaultDefinition:    SafeString(reader, "default_definition"),
-                CollationName:        SafeString(reader, "collation_name"),
-                IsRowGuidCol:         reader.GetBoolean(reader.GetOrdinal("is_rowguidcol"))));
+                Name:                      reader.GetString(reader.GetOrdinal("name")),
+                TypeName:                  reader.GetString(reader.GetOrdinal("type_name")),
+                MaxLength:                 reader.GetInt16 (reader.GetOrdinal("max_length")),
+                Precision:                 reader.GetByte  (reader.GetOrdinal("precision")),
+                Scale:                     reader.GetByte  (reader.GetOrdinal("scale")),
+                IsNullable:                reader.GetBoolean(reader.GetOrdinal("is_nullable")),
+                IsIdentity:                reader.GetBoolean(reader.GetOrdinal("is_identity")),
+                IdentitySeed:              SafeLong(reader, "identity_seed"),
+                IdentityIncrement:         SafeLong(reader, "identity_increment"),
+                IdentityNotForReplication: SafeBool(reader, "identity_not_for_replication") ?? false,
+                ComputedDefinition:        SafeString(reader, "computed_definition"),
+                ComputedIsPersisted:       SafeBool(reader, "computed_is_persisted"),
+                DefaultName:               SafeString(reader, "default_name"),
+                DefaultDefinition:         SafeString(reader, "default_definition"),
+                CollationName:             SafeString(reader, "collation_name"),
+                IsRowGuidCol:              reader.GetBoolean(reader.GetOrdinal("is_rowguidcol"))));
         }
         return list;
     }
@@ -522,7 +558,10 @@ ORDER BY schema_name, o.name";
         }
 
         if (c.IsIdentity)
+        {
             sb.Append(" IDENTITY(").Append(c.IdentitySeed ?? 1).Append(',').Append(c.IdentityIncrement ?? 1).Append(')');
+            if (c.IdentityNotForReplication) sb.Append(" NOT FOR REPLICATION");
+        }
 
         if (c.IsRowGuidCol)
             sb.Append(" ROWGUIDCOL");
@@ -632,7 +671,8 @@ ORDER BY schema_name, o.name";
 
     // ---- Check constraints -------------------------------------------------
 
-    private sealed record CheckConstraintInfo(string Name, string Definition, bool IsNotTrusted);
+    private sealed record CheckConstraintInfo(
+        string Name, string Definition, bool IsNotTrusted, bool IsNotForReplication);
 
     private static async Task<List<CheckConstraintInfo>> LoadCheckConstraintsAsync(
         SqlConnection conn, ObjectIdentifier id, CancellationToken ct)
@@ -645,20 +685,31 @@ ORDER BY schema_name, o.name";
         while (await reader.ReadAsync(ct))
         {
             list.Add(new CheckConstraintInfo(
-                Name:         reader.GetString(0),
-                Definition:   reader.GetString(1),
-                IsNotTrusted: reader.GetBoolean(2)));
+                Name:                reader.GetString(0),
+                Definition:          reader.GetString(1),
+                IsNotTrusted:        reader.GetBoolean(2),
+                IsNotForReplication: reader.GetBoolean(3)));
         }
         return list;
     }
 
+    /// <summary>
+    /// Renders one named CHECK constraint. <c>NOT FOR REPLICATION</c>
+    /// goes between <c>CHECK</c> and the predicate per T-SQL grammar —
+    /// dropping it would let replication agents trigger checks they
+    /// were configured to skip on production.
+    /// </summary>
     private static string RenderCheckConstraint(CheckConstraintInfo c)
-        => $"    CONSTRAINT [{c.Name}] CHECK {c.Definition}";
+    {
+        var nfr = c.IsNotForReplication ? " NOT FOR REPLICATION" : "";
+        return $"    CONSTRAINT [{c.Name}] CHECK{nfr} {c.Definition}";
+    }
 
     // ---- Foreign keys ------------------------------------------------------
 
     private sealed record ForeignKeyColumn(
-        string ConstraintName, bool IsNotTrusted, string RefSchema, string RefTable,
+        string ConstraintName, bool IsNotTrusted, bool IsNotForReplication,
+        string RefSchema, string RefTable,
         string ColumnName, string RefColumn, string OnDelete, string OnUpdate);
 
     private static async Task<List<ForeignKeyGroup>> LoadForeignKeysAsync(
@@ -672,44 +723,54 @@ ORDER BY schema_name, o.name";
         while (await reader.ReadAsync(ct))
         {
             rows.Add(new ForeignKeyColumn(
-                ConstraintName: reader.GetString(0),
-                IsNotTrusted:   reader.GetBoolean(1),
-                RefSchema:      reader.GetString(2),
-                RefTable:       reader.GetString(3),
-                ColumnName:     reader.GetString(5),
-                RefColumn:      reader.GetString(6),
-                OnDelete:       reader.GetString(7),
-                OnUpdate:       reader.GetString(8)));
+                ConstraintName:      reader.GetString(0),
+                IsNotTrusted:        reader.GetBoolean(1),
+                IsNotForReplication: reader.GetBoolean(2),
+                RefSchema:           reader.GetString(3),
+                RefTable:            reader.GetString(4),
+                ColumnName:          reader.GetString(6),
+                RefColumn:           reader.GetString(7),
+                OnDelete:            reader.GetString(8),
+                OnUpdate:            reader.GetString(9)));
         }
         return rows.GroupBy(r => r.ConstraintName)
                    .Select(g => new ForeignKeyGroup(
-                       Name:         g.Key,
-                       IsNotTrusted: g.First().IsNotTrusted,
-                       RefSchema:    g.First().RefSchema,
-                       RefTable:     g.First().RefTable,
-                       OnDelete:     g.First().OnDelete,
-                       OnUpdate:     g.First().OnUpdate,
-                       Columns:      g.Select(r => (r.ColumnName, r.RefColumn)).ToList()))
+                       Name:                g.Key,
+                       IsNotTrusted:        g.First().IsNotTrusted,
+                       IsNotForReplication: g.First().IsNotForReplication,
+                       RefSchema:           g.First().RefSchema,
+                       RefTable:            g.First().RefTable,
+                       OnDelete:            g.First().OnDelete,
+                       OnUpdate:            g.First().OnUpdate,
+                       Columns:             g.Select(r => (r.ColumnName, r.RefColumn)).ToList()))
                    .ToList();
     }
 
     private sealed record ForeignKeyGroup(
-        string Name, bool IsNotTrusted, string RefSchema, string RefTable,
+        string Name, bool IsNotTrusted, bool IsNotForReplication,
+        string RefSchema, string RefTable,
         string OnDelete, string OnUpdate,
         List<(string Column, string RefColumn)> Columns);
 
+    /// <summary>
+    /// Emits a foreign-key as <c>ALTER TABLE ... ADD CONSTRAINT</c>.
+    /// <c>NOT FOR REPLICATION</c> sits after the column list and before
+    /// the optional <c>ON DELETE</c>/<c>ON UPDATE</c> clauses per T-SQL
+    /// grammar.
+    /// </summary>
     private static string RenderForeignKey(ForeignKeyGroup fk, ObjectIdentifier id)
     {
         var cols    = string.Join(", ", fk.Columns.Select(c => $"[{c.Column}]"));
         var refCols = string.Join(", ", fk.Columns.Select(c => $"[{c.RefColumn}]"));
         var check   = fk.IsNotTrusted ? "WITH NOCHECK" : "WITH CHECK";
+        var nfr     = fk.IsNotForReplication ? " NOT FOR REPLICATION" : "";
         var onDel   = fk.OnDelete.Equals("NO_ACTION", StringComparison.OrdinalIgnoreCase)
             ? "" : $" ON DELETE {fk.OnDelete.Replace('_', ' ')}";
         var onUpd   = fk.OnUpdate.Equals("NO_ACTION", StringComparison.OrdinalIgnoreCase)
             ? "" : $" ON UPDATE {fk.OnUpdate.Replace('_', ' ')}";
         return $"ALTER TABLE [{id.Schema}].[{id.Name}] {check} ADD CONSTRAINT [{fk.Name}] " +
                $"FOREIGN KEY ({cols}) REFERENCES [{fk.RefSchema}].[{fk.RefTable}] ({refCols})" +
-               $"{onDel}{onUpd};\n";
+               $"{nfr}{onDel}{onUpd};\n";
     }
 
     // ---- Non-PK/UQ indexes -------------------------------------------------
