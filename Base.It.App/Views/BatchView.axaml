@@ -9,10 +9,10 @@
          0  Profile bar (saved source/target presets)
          1  Source + badge
          2  Targets checklist
-         3  Objects toolbar (file input, load, manual, add, backup, execute, clear, counters)
+         3  Objects toolbar (file loader + Backup/Execute/Clear/Remove)
          4  DACPAC opt-in (collapsed when not configured)
-         5  Status filter
-         6  DataGrid (filtered)
+         5  Status + name filters + counters
+         6  Items card: QuickAdd row + DataGrid
          7  Status bar -->
     <DockPanel>
         <!-- Slim indeterminate progress bar docked to the top of the pane. -->
@@ -126,26 +126,28 @@
             </StackPanel>
         </Border>
 
-        <!-- Objects toolbar -->
+        <!-- Objects toolbar — manual-object input is gone; quick-add now
+             lives as the first editable row above the items grid. The
+             file loader keeps Load + Backup + Execute + Clear + Remove. -->
         <Border Grid.Row="3" Classes="toolbar" Margin="0,0,0,6">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,*">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*">
                 <TextBox Grid.Column="0" Width="320" Text="{Binding FilePath}"
-                         Watermark=".csv / .xlsx (column 'Object name')"/>
+                         Watermark=".csv / .xlsx">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding LoadFromFileCommand}"/>
+                    </TextBox.KeyBindings>
+                </TextBox>
                 <Button  Grid.Column="1" Margin="4,0,0,0" MinWidth="64" Content="Load"
                          Command="{Binding LoadFromFileCommand}"/>
-                <TextBox Grid.Column="2" Width="180" Margin="8,0,0,0"
-                         Text="{Binding ManualObject}" Watermark="Manual object"/>
-                <Button  Grid.Column="3" Margin="4,0,0,0" MinWidth="64" Content="Add"
-                         Command="{Binding AddManualCommand}"/>
-                <Button  Grid.Column="4" Margin="12,0,0,0" MinWidth="72" Content="Backup"
+                <Button  Grid.Column="2" Margin="12,0,0,0" MinWidth="72" Content="Backup"
                          Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
                          ToolTip.Tip="Capture each row from source + ticked targets without altering anything."/>
-                <Button  Grid.Column="5" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
+                <Button  Grid.Column="3" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
                          Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
-                <Button  Grid.Column="6" Margin="4,0,0,0" MinWidth="64" Content="Clear"
+                <Button  Grid.Column="4" Margin="4,0,0,0" MinWidth="64" Content="Clear"
                          Command="{Binding ClearCommand}"
                          ToolTip.Tip="Remove every row from the list."/>
-                <Button  Grid.Column="7" Margin="4,0,0,0" MinWidth="120" Content="Remove selected"
+                <Button  Grid.Column="5" Margin="4,0,0,0" MinWidth="120" Content="Remove selected"
                          Command="{Binding RemoveCheckedCommand}"
                          ToolTip.Tip="Remove rows whose checkbox (left-most column) is ticked."/>
             </Grid>
@@ -164,32 +166,79 @@
             </Grid>
         </Border>
 
-        <!-- Status filter + live OK/Fail counters -->
+        <!-- Status filter + name find-box + live OK/Fail counters.
+             Ctrl+F (UserControl-level) focuses the name find-box. -->
         <Border Grid.Row="5" Classes="toolbar" Margin="0,0,0,6">
-            <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
-                <TextBlock Grid.Column="0" Text="Filter" VerticalAlignment="Center"
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
+                <TextBlock Grid.Column="0" Text="Status" VerticalAlignment="Center"
                            Margin="0,0,8,0" FontSize="12" Opacity="0.7"/>
                 <ComboBox Grid.Column="1" Width="140"
                           ItemsSource="{Binding StatusFilterOptions}"
                           SelectedItem="{Binding StatusFilter}"/>
-                <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="12,0,12,0"
+                <TextBlock Grid.Column="2" Text="Find" VerticalAlignment="Center"
+                           Margin="14,0,8,0" FontSize="12" Opacity="0.7"/>
+                <TextBox Grid.Column="3" x:Name="NameFilterBox" Width="200"
+                         Text="{Binding NameFilter, Mode=TwoWay}"
+                         Watermark="Filter by name (Ctrl+F)"/>
+                <TextBlock Grid.Column="4" VerticalAlignment="Center" Margin="12,0,12,0"
                            FontSize="11" Opacity="0.55"
-                           Text="Rows matching the selected status. 'All' shows everything."
+                           Text="Rows matching status AND name. Blank = no filter."
                            TextTrimming="CharacterEllipsis"/>
-                <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="0,0,12,0"
+                <TextBlock Grid.Column="5" VerticalAlignment="Center" Margin="0,0,12,0"
                            Text="{Binding SuccessCount, StringFormat='OK: {0}'}"
                            Foreground="{DynamicResource SystemFillColorSuccessBrush}" FontSize="11"/>
-                <TextBlock Grid.Column="4" VerticalAlignment="Center"
+                <TextBlock Grid.Column="6" VerticalAlignment="Center"
                            Text="{Binding FailCount, StringFormat='Fail: {0}'}"
                            Foreground="{DynamicResource SystemFillColorCriticalBrush}" FontSize="11"/>
             </Grid>
         </Border>
 
-        <!-- Grid -->
+        <!-- Grid: Excel-like behaviour — drag/Shift/Ctrl multi-select via
+             SelectionMode=Extended, Ctrl+C copies the selection to the
+             clipboard (ClipboardCopyMode=ExcludeHeader), Ctrl+V pastes a
+             newline-separated list of names (handler in code-behind),
+             Delete removes the selected rows.
+
+             The QuickAdd box sits flush at the top of the same card so
+             it visually reads as the editable first row. Type a name +
+             Enter to add it; pasting multi-line text fans out into one
+             row per line. The Manual Object box + Add button are gone —
+             this replaces both. -->
         <Border Grid.Row="6" Classes="card" Padding="0" ClipToBounds="True">
-            <DataGrid ItemsSource="{Binding FilteredItems}" AutoGenerateColumns="False"
+          <DockPanel>
+            <!-- The QuickAdd row sits above the DataGrid header but its
+                 column structure mirrors the grid (44,50,*,100,2*) so the
+                 "+" indicator lands right under the # column header and
+                 the input lines up with the Object-name column. Visually
+                 it reads as the always-ready first row of the list. -->
+            <Border DockPanel.Dock="Top"
+                    BorderThickness="0,0,0,1"
+                    BorderBrush="{DynamicResource App.StrokeBrush}"
+                    Background="{DynamicResource App.ToolbarBgBrush}"
+                    Padding="0,6">
+                <Grid ColumnDefinitions="44,50,*,100,2*">
+                    <!-- col 0: empty (matches the checkbox column) -->
+                    <TextBlock Grid.Column="1" Text="＋"
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               FontSize="13" FontWeight="Bold"
+                               Foreground="{DynamicResource App.SuccessBrush}"
+                               ToolTip.Tip="Type a name + Enter to add. Paste a multi-line list to add many at once."/>
+                    <TextBox Grid.Column="2" Grid.ColumnSpan="3"
+                             x:Name="QuickAddBox"
+                             BorderThickness="0" Background="Transparent"
+                             Padding="0,2" MinHeight="24"
+                             VerticalContentAlignment="Center"
+                             Watermark="Type or paste object name(s) — Enter to add"
+                             KeyDown="OnQuickAddKeyDown"
+                             PastingFromClipboard="OnQuickAddPaste"/>
+                </Grid>
+            </Border>
+            <DataGrid x:Name="ItemsGrid" ItemsSource="{Binding FilteredItems}" AutoGenerateColumns="False"
                       HeadersVisibility="Column" GridLinesVisibility="Horizontal"
-                      CanUserReorderColumns="False">
+                      CanUserReorderColumns="False"
+                      SelectionMode="Extended"
+                      ClipboardCopyMode="ExcludeHeader"
+                      KeyDown="OnGridKeyDown">
                 <DataGrid.Columns>
                     <DataGridTemplateColumn Header="" Width="44" CanUserResize="False" CanUserSort="False">
                         <DataGridTemplateColumn.CellTemplate>
@@ -206,6 +255,7 @@
                     <DataGridTextColumn Header="Message"     Binding="{Binding Message}" Width="2*"  IsReadOnly="True"/>
                 </DataGrid.Columns>
             </DataGrid>
+          </DockPanel>
         </Border>
 
         <Border Grid.Row="7" Classes="pageStatus">

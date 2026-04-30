@@ -21,7 +21,11 @@
                            VerticalAlignment="Center" Margin="8,0,8,0"/>
                 <TextBox  Grid.Column="2" Text="{Binding ObjectName}"
                           Watermark="schema.object (e.g. dbo.usp_Something)"
-                          MinHeight="28"/>
+                          MinHeight="28">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding FetchCommand}"/>
+                    </TextBox.KeyBindings>
+                </TextBox>
                 <ComboBox Grid.Column="3" Margin="6,0,0,0"
                           ItemsSource="{Binding Databases}"
                           SelectedItem="{Binding SelectedDatabase}"

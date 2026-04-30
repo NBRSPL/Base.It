@@ -37,8 +37,9 @@ public sealed partial class BatchViewModel : ObservableObject
     [ObservableProperty] private string? _sourceEnv;
     [ObservableProperty] private string? _sourceDatabase;
     [ObservableProperty] private string _filePath = "";
-    [ObservableProperty] private string _manualObject = "";
     [ObservableProperty] private string _statusFilter = "All";
+    /// <summary>Name-substring filter, intersects with <see cref="StatusFilter"/>.</summary>
+    [ObservableProperty] private string _nameFilter = "";
     [ObservableProperty] private int _successCount;
     [ObservableProperty] private int _failCount;
     [ObservableProperty] private bool _isBusy;
@@ -149,6 +150,7 @@ public sealed partial class BatchViewModel : ObservableObject
     }
 
     partial void OnStatusFilterChanged(string value) => RebuildFilteredItems();
+    partial void OnNameFilterChanged(string value)   => RebuildFilteredItems();
 
     private void RebuildFilteredItems()
     {
@@ -162,8 +164,15 @@ public sealed partial class BatchViewModel : ObservableObject
             "Skipped"  => BatchStatus.Skipped,
             _          => null
         };
+        var nameNeedle = (NameFilter ?? "").Trim();
         foreach (var it in Items)
-            if (want is null || it.Status == want) FilteredItems.Add(it);
+        {
+            if (want is not null && it.Status != want) continue;
+            if (nameNeedle.Length > 0 &&
+                !it.Name.Contains(nameNeedle, StringComparison.OrdinalIgnoreCase))
+                continue;
+            FilteredItems.Add(it);
+        }
     }
 
     private void Renumber()
@@ -459,30 +468,63 @@ public sealed partial class BatchViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void AddManual()
-    {
-        var n = ManualObject.Trim();
-        if (string.IsNullOrWhiteSpace(n))
-        {
-            _svc.Toasts.Warning("Nothing to add", "Type an object name into the 'Manual object' field first.");
-            return;
-        }
-        if (Items.Any(i => string.Equals(i.Name, n, StringComparison.OrdinalIgnoreCase)))
-        {
-            _svc.Toasts.Warning("Already in the list", $"'{n}' is already in the batch.");
-            return;
-        }
-        Items.Add(new BatchItem(n));
-        ManualObject = "";
-        Status = $"Added {n}. Total: {Items.Count}.";
-        _svc.Toasts.Success("Added", $"{n} · {Items.Count} total.");
-    }
-
-    [RelayCommand]
     private void RemoveSelected(BatchItem? item)
     {
         if (item is null) return;
         Items.Remove(item);
+    }
+
+    /// <summary>
+    /// Append items from clipboard / external paste. Splits on CR/LF,
+    /// trims each line, drops blanks, and skips entries that are
+    /// already in <see cref="Items"/> (case-insensitive on Name) so a
+    /// re-paste doesn't double the list. Returns the count actually
+    /// added so the caller can surface a toast — nothing else changes
+    /// when nothing was added (e.g. clipboard had blank text).
+    /// </summary>
+    public int PasteText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return 0;
+        var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        var existing = new HashSet<string>(
+            Items.Select(i => i.Name),
+            StringComparer.OrdinalIgnoreCase);
+        int added = 0;
+        foreach (var raw in lines)
+        {
+            var name = raw.Trim();
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            if (!existing.Add(name)) continue;
+            Items.Add(new BatchItem(name));
+            added++;
+        }
+        if (added > 0)
+        {
+            Status = $"Pasted {added} object(s). Total: {Items.Count}.";
+            _svc.Toasts.Success("Pasted from clipboard", $"{added} added · {Items.Count} total.");
+        }
+        else
+        {
+            _svc.Toasts.Info("Nothing pasted", "Clipboard didn't contain any new object names.");
+        }
+        return added;
+    }
+
+    /// <summary>
+    /// Remove the given rows from the list. Used by the DataGrid's
+    /// Delete-key handler in the view; also useful for any future
+    /// bulk-remove command. Caller passes a snapshot — we don't
+    /// re-enumerate the live SelectedItems here because that
+    /// collection mutates as we remove.
+    /// </summary>
+    public int DeleteRows(IEnumerable<BatchItem> rows)
+    {
+        var snapshot = rows?.ToList() ?? new List<BatchItem>();
+        if (snapshot.Count == 0) return 0;
+        foreach (var r in snapshot) Items.Remove(r);
+        Status = $"Removed {snapshot.Count} row(s). {Items.Count} remaining.";
+        _svc.Toasts.Info("Rows removed", $"Removed {snapshot.Count} · {Items.Count} remaining.");
+        return snapshot.Count;
     }
 
     /// <summary>

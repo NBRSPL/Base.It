@@ -77,7 +77,11 @@
                     <TextBlock Text="{Binding SourceProfile.Label}"/>
                 </Border>
                 <TextBox Grid.Column="3" Width="260" Margin="12,0,0,0"
-                         Text="{Binding ObjectName}" Watermark="dbo.usp_Something"/>
+                         Text="{Binding ObjectName}" Watermark="dbo.usp_Something">
+                    <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding ExecuteCommand}"/>
+                    </TextBox.KeyBindings>
+                </TextBox>
                 <!-- flex spacer @ col 4 -->
                 <Button  Grid.Column="5" Margin="8,0,0,0" MinWidth="72" Content="Backup"
                          Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
@@ -97,9 +101,10 @@
                 <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
                     <TextBlock Grid.Column="0" Text="Targets" VerticalAlignment="Center"
                                Margin="0,0,10,0" FontSize="12" Opacity="0.7"/>
-                    <TextBox  Grid.Column="1" Width="220" MinHeight="28"
+                    <TextBox  Grid.Column="1" x:Name="TargetFilterBox"
+                              Width="220" MinHeight="28"
                               Text="{Binding TargetFilter, Mode=TwoWay}"
-                              Watermark="Filter — name, ENV or database"/>
+                              Watermark="Filter (Ctrl+F) — name, ENV or database"/>
                     <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="12,0,12,0"
                                FontSize="11" Opacity="0.55"
                                Text="{Binding TargetSelectedCount, StringFormat='{}{0} selected'}"/>

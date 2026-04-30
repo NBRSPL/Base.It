@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input;
 using Base.It.App.ViewModels;
 
 namespace Base.It.App.Views;
@@ -9,6 +10,19 @@ public partial class SyncView : UserControl
     {
         InitializeComponent();
         WireSourceFilter();
+        // Pane-wide Ctrl+F focuses the target filter input.
+        KeyDown += OnPaneKeyDown;
+    }
+
+    private void OnPaneKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            var box = this.FindControl<TextBox>("TargetFilterBox");
+            box?.Focus();
+            box?.SelectAll();
+            e.Handled = true;
+        }
     }
 
     /// <summary>

@@ -3,9 +3,18 @@ using NPOI.XSSF.UserModel;
 namespace Base.It.Core.Batch;
 
 /// <summary>
-/// Loads a list of object names from a CSV or XLSX file. The file must have
-/// a header row containing a column named "Object name" (case-insensitive).
-/// Other columns are ignored. Matches the original DB_Sync behaviour.
+/// Loads a list of object names from a CSV or XLSX file.
+///
+/// <para>The first row is treated as a header and skipped — we don't
+/// require any specific column name. Every subsequent row's first
+/// column is taken as the object name (case-insensitive de-duplication).
+/// Other columns are ignored. Blank cells are skipped, not propagated as
+/// empty rows.</para>
+///
+/// <para>This is permissive on purpose: the original loader only worked
+/// when the spreadsheet had an exact "Object name" header column, which
+/// silently dropped real input files that just happened to call the
+/// column something else (Name, ObjectName, Procedure, etc.).</para>
 /// </summary>
 public static class ObjectListLoader
 {
@@ -24,21 +33,20 @@ public static class ObjectListLoader
     public static IReadOnlyList<string> FromCsvLines(IReadOnlyList<string> lines)
     {
         if (lines.Count < 2) return Array.Empty<string>();
-        var headers = lines[0].Split(',').Select(h => h.Trim().Trim('"')).ToArray();
-        var col = Array.FindIndex(headers,
-            h => h.Equals("Object name", StringComparison.OrdinalIgnoreCase));
-        if (col < 0) return Array.Empty<string>();
 
         var result = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Skip lines[0] — header row, contents irrelevant.
         for (int i = 1; i < lines.Count; i++)
         {
-            var cells = lines[i].Split(',').Select(c => c.Trim().Trim('"')).ToArray();
-            if (col < cells.Length)
-            {
-                var name = cells[col];
-                if (!string.IsNullOrWhiteSpace(name) && seen.Add(name)) result.Add(name);
-            }
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            // Take the first cell. Strip surrounding quotes the way a
+            // CSV roundtrip from Excel produces them.
+            var firstComma = line.IndexOf(',');
+            var raw = firstComma < 0 ? line : line.Substring(0, firstComma);
+            var name = raw.Trim().Trim('"').Trim();
+            if (!string.IsNullOrWhiteSpace(name) && seen.Add(name)) result.Add(name);
         }
         return result;
     }
@@ -48,22 +56,14 @@ public static class ObjectListLoader
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read);
         var wb = new XSSFWorkbook(fs);
         var sheet = wb.GetSheetAt(0);
-        var header = sheet.GetRow(0);
-        if (header is null) return Array.Empty<string>();
-
-        int col = -1;
-        for (int c = 0; c < header.LastCellNum; c++)
-        {
-            var v = header.GetCell(c)?.ToString()?.Trim();
-            if (v is not null && v.Equals("Object name", StringComparison.OrdinalIgnoreCase)) { col = c; break; }
-        }
-        if (col < 0) return Array.Empty<string>();
+        if (sheet.LastRowNum < 1) return Array.Empty<string>();
 
         var result = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // Skip row 0 — header row, contents irrelevant.
         for (int r = 1; r <= sheet.LastRowNum; r++)
         {
-            var cell = sheet.GetRow(r)?.GetCell(col);
+            var cell = sheet.GetRow(r)?.GetCell(0);
             var name = cell?.ToString()?.Trim();
             if (!string.IsNullOrWhiteSpace(name) && seen.Add(name!)) result.Add(name!);
         }

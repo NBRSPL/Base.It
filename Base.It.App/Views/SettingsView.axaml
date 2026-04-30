@@ -11,6 +11,12 @@
              pull focus until hovered. -->
     </UserControl.Resources>
 
+    <!-- Pane-level shortcut: Ctrl+S triggers Save all from anywhere in
+         Settings, even with focus inside a deep editor expander. -->
+    <UserControl.KeyBindings>
+        <KeyBinding Gesture="Ctrl+S" Command="{Binding SaveCommand}"/>
+    </UserControl.KeyBindings>
+
     <Grid RowDefinitions="*,Auto" ColumnDefinitions="300,*">
 
         <!-- Master: connections grouped as an expandable tree. -->

@@ -20,10 +20,13 @@ public class ObjectListLoaderTests
     }
 
     [Fact]
-    public void Csv_missing_header_column_returns_empty()
+    public void Csv_with_arbitrary_header_still_reads_first_column()
     {
-        var lines = new[] { "Name,Comment", "usp_Foo,something" };
-        Assert.Empty(ObjectListLoader.FromCsvLines(lines));
+        // The header column doesn't have to be called "Object name" any
+        // more — row 0 is always treated as a header and skipped.
+        var lines = new[] { "Name,Comment", "usp_Foo,something", "vw_Bar," };
+        var names = ObjectListLoader.FromCsvLines(lines);
+        Assert.Equal(new[] { "usp_Foo", "vw_Bar" }, names);
     }
 
     [Fact]
@@ -31,7 +34,7 @@ public class ObjectListLoaderTests
     {
         var lines = new[]
         {
-            "Object name",
+            "anything",
             "usp_Foo",
             "USP_FOO",
             "vw_Bar"
