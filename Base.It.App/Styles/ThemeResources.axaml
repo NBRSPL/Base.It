@@ -63,6 +63,13 @@
             <Color x:Key="App.FieldErrorBorderColor">#F04747</Color>
             <Color x:Key="App.FieldErrorBgColor">#2A1418</Color>
 
+            <!-- Diff highlight (used by Compare panes + Batch Preview).
+                 Dark: deep amber bg with bright amber-cream fg, well above
+                 the WCAG AA contrast threshold so changed lines stay
+                 legible against the dark surface. -->
+            <Color x:Key="App.DiffBgColor">#3F2A14</Color>
+            <Color x:Key="App.DiffFgColor">#FFD089</Color>
+
             <!-- ==== Brushes (bind these from XAML) ==== -->
             <SolidColorBrush x:Key="App.WindowBgBrush" Color="{StaticResource App.WindowBgColor}"/>
             <SolidColorBrush x:Key="App.CardBgBrush" Color="{StaticResource App.CardBgColor}"/>
@@ -105,6 +112,9 @@
 
             <SolidColorBrush x:Key="App.FieldErrorBorderBrush" Color="{StaticResource App.FieldErrorBorderColor}"/>
             <SolidColorBrush x:Key="App.FieldErrorBgBrush" Color="{StaticResource App.FieldErrorBgColor}"/>
+
+            <SolidColorBrush x:Key="App.DiffBgBrush" Color="{StaticResource App.DiffBgColor}"/>
+            <SolidColorBrush x:Key="App.DiffFgBrush" Color="{StaticResource App.DiffFgColor}"/>
 
             <!-- Override FluentAvalonia tokens so existing bindings pick up the sharper palette -->
             <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>
@@ -187,6 +197,13 @@
             <Color x:Key="App.FieldErrorBorderColor">#C9292E</Color>
             <Color x:Key="App.FieldErrorBgColor">#FDECEC</Color>
 
+            <!-- Diff highlight (used by Compare panes + Batch Preview).
+                 Light: pale amber bg with dark amber fg — same hue as
+                 dark but inverted lightness so the eye reads "highlight"
+                 in both modes. -->
+            <Color x:Key="App.DiffBgColor">#FFF3D6</Color>
+            <Color x:Key="App.DiffFgColor">#7A4500</Color>
+
             <!-- ==== Brushes ==== -->
             <SolidColorBrush x:Key="App.WindowBgBrush" Color="{StaticResource App.WindowBgColor}"/>
             <SolidColorBrush x:Key="App.CardBgBrush" Color="{StaticResource App.CardBgColor}"/>
@@ -229,6 +246,9 @@
 
             <SolidColorBrush x:Key="App.FieldErrorBorderBrush" Color="{StaticResource App.FieldErrorBorderColor}"/>
             <SolidColorBrush x:Key="App.FieldErrorBgBrush" Color="{StaticResource App.FieldErrorBgColor}"/>
+
+            <SolidColorBrush x:Key="App.DiffBgBrush" Color="{StaticResource App.DiffBgColor}"/>
+            <SolidColorBrush x:Key="App.DiffFgBrush" Color="{StaticResource App.DiffFgColor}"/>
 
             <!-- Override FluentAvalonia tokens -->
             <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>

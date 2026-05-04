@@ -224,7 +224,7 @@
                             <StackPanel Grid.Column="1" Spacing="2">
                                 <TextBox Text="{Binding Environment}"
                                          Classes.errorField="{Binding EnvironmentError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                         Watermark="e.g. Development"/>
+                                         Watermark="Environment"/>
                                 <TextBlock Text="{Binding EnvironmentError}" Classes="errorText"
                                            IsVisible="{Binding EnvironmentError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                             </StackPanel>
@@ -241,7 +241,7 @@
                         <Grid Classes="formRow" ColumnDefinitions="90,*,12,90,*">
                             <TextBlock Text="Display"/>
                             <TextBox Grid.Column="1" Text="{Binding DisplayName}"
-                                     Watermark="Custom label (optional)"/>
+                                     Watermark="Display name"/>
                             <TextBlock Grid.Column="3" Text="Color"/>
                             <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4"
                                         VerticalAlignment="Center" HorizontalAlignment="Left">
@@ -282,7 +282,7 @@
                                     <TextBox Text="{Binding RawConnectionString}"
                                              Classes.errorField="{Binding RawError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
                                              AcceptsReturn="True" MinHeight="44"
-                                             Watermark="Server=...;Database=...;User Id=...;Password=...;"/>
+                                             Watermark="Connection string"/>
                                     <TextBlock Text="{Binding RawError}" Classes="errorText"
                                                IsVisible="{Binding RawError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                                 </StackPanel>
@@ -295,13 +295,13 @@
                                 <StackPanel Grid.Column="1" Spacing="2">
                                     <TextBox Text="{Binding Server}"
                                              Classes.errorField="{Binding ServerError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                             Watermark="Hostname or IP"/>
+                                             Watermark="Server"/>
                                     <TextBlock Text="{Binding ServerError}" Classes="errorText"
                                                IsVisible="{Binding ServerError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                                 </StackPanel>
                                 <TextBlock Grid.Column="3" Text="SQL db"/>
                                 <TextBox Grid.Column="4" Text="{Binding DatabaseName}"
-                                         Watermark="DB name on server (optional)"/>
+                                         Watermark="Database"/>
                             </Grid>
                             <Grid Classes="formRow" ColumnDefinitions="90,*,12,90,*"
                                   IsVisible="{Binding Auth, Converter={x:Static vm:AuthModeEquals.Sql}}">
@@ -309,7 +309,7 @@
                                 <StackPanel Grid.Column="1" Spacing="2">
                                     <TextBox Text="{Binding Username}"
                                              Classes.errorField="{Binding UsernameError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
-                                             Watermark="Login name"/>
+                                             Watermark="Username"/>
                                     <TextBlock Text="{Binding UsernameError}" Classes="errorText"
                                                IsVisible="{Binding UsernameError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                                 </StackPanel>
@@ -469,7 +469,7 @@
                         <Grid Classes="formRow" ColumnDefinitions="90,*,Auto,Auto">
                             <TextBlock Text="Folder"/>
                             <TextBox Grid.Column="1" Text="{Binding BackupRootInput}"
-                                     Watermark="e.g. C:\DB_Backup"/>
+                                     Watermark="Folder path"/>
                             <Button Grid.Column="2" Margin="6,0,0,0" Content="Browse…"
                                     Command="{Binding BrowseBackupFolderCommand}"/>
                             <Button Grid.Column="3" Margin="6,0,0,0" Content="Reset"
@@ -503,7 +503,7 @@
                         <Grid Classes="formRow" ColumnDefinitions="110,*,Auto">
                             <TextBlock Text="Root folder"/>
                             <TextBox Grid.Column="1" Text="{Binding DacpacRootFolder}"
-                                     Watermark="Folder containing your .sqlproj"/>
+                                     Watermark="Folder path"/>
                             <Button Grid.Column="2" Margin="6,0,0,0" Content="Browse…"
                                     Command="{Binding BrowseDacpacFolderCommand}"/>
                         </Grid>

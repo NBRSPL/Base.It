@@ -1,36 +1,20 @@
 using Avalonia.Controls;
-using Avalonia.Input;
 using Base.It.App.ViewModels;
 
 namespace Base.It.App.Views;
 
-public partial class SyncView : UserControl
+public partial class SyncView : UserControl, ISupportsFind
 {
+    private SyncViewModel? _hookedVm;
+
     public SyncView()
     {
         InitializeComponent();
         WireSourceFilter();
-        // Pane-wide Ctrl+F focuses the target filter input.
-        KeyDown += OnPaneKeyDown;
+        DataContextChanged += OnDataContextChanged;
+        DetachedFromVisualTree += (_, _) => UnhookVm();
     }
 
-    private void OnPaneKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
-        {
-            var box = this.FindControl<TextBox>("TargetFilterBox");
-            box?.Focus();
-            box?.SelectAll();
-            e.Handled = true;
-        }
-    }
-
-    /// <summary>
-    /// AutoCompleteBox's default filter only matches against ToString() —
-    /// when DisplayName is set the env/db pair becomes invisible to
-    /// type-ahead. This filter makes the picker searchable by display
-    /// name, environment, or database name simultaneously.
-    /// </summary>
     private void WireSourceFilter()
     {
         var box = this.FindControl<AutoCompleteBox>("SourceBox");
@@ -44,5 +28,45 @@ public partial class SyncView : UserControl
                 || p.Environment.Contains(s, System.StringComparison.OrdinalIgnoreCase)
                 || p.Database.Contains(s, System.StringComparison.OrdinalIgnoreCase);
         };
+    }
+
+    /// <summary>ISupportsFind: maps the global find overlay to the Sync target filter.</summary>
+    public void ApplyFind(string? text)
+    {
+        if (DataContext is not SyncViewModel vm) return;
+        vm.TargetFilter = text ?? string.Empty;
+    }
+
+    public string CurrentFindText
+        => (DataContext as SyncViewModel)?.TargetFilter ?? string.Empty;
+
+    /// <summary>
+    /// Subscribe to the VM's preview request so the view can own the Window
+    /// instance — keeps Window/UI deps out of the VM. Re-subscribed when the
+    /// DataContext changes (theme reload, navigation churn).
+    /// </summary>
+    private void OnDataContextChanged(object? sender, System.EventArgs e)
+    {
+        UnhookVm();
+        if (DataContext is SyncViewModel vm)
+        {
+            _hookedVm = vm;
+            vm.PreviewRequested += OnPreviewRequested;
+        }
+    }
+
+    private void UnhookVm()
+    {
+        if (_hookedVm is null) return;
+        _hookedVm.PreviewRequested -= OnPreviewRequested;
+        _hookedVm = null;
+    }
+
+    private void OnPreviewRequested(BatchPreviewViewModel preview)
+    {
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        var win = new BatchPreviewWindow { DataContext = preview };
+        if (owner is not null) win.ShowDialog(owner);
+        else                   win.Show();
     }
 }

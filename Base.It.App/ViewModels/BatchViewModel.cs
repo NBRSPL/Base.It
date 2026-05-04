@@ -190,8 +190,32 @@ public sealed partial class BatchViewModel : ObservableObject
         Endpoints.Clear();
         foreach (var ep in EnvironmentListProvider.Endpoints(_svc)) Endpoints.Add(ep);
 
-        SourceEnv      ??= Environments.FirstOrDefault();
-        SourceDatabase ??= Databases.FirstOrDefault();
+        // Reconcile the previously-picked source against the new visible
+        // endpoint set. When the active connection group changes, the old
+        // source may no longer be visible — without this the picker text
+        // clears but SourceEnv/SourceDatabase persist, leaving the colour
+        // badge stuck on the previous selection.
+        var match = Endpoints.FirstOrDefault(e =>
+            string.Equals(e.Environment, SourceEnv,      StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(e.Database,    SourceDatabase, StringComparison.OrdinalIgnoreCase));
+        _suspendRebuild = true;
+        try
+        {
+            if (match is null)
+            {
+                var firstEp = Endpoints.FirstOrDefault();
+                SourceEnv      = firstEp?.Environment;
+                SourceDatabase = firstEp?.Database;
+            }
+            else
+            {
+                // Snap to the canonical casing the catalog returned.
+                SourceEnv      = match.Environment;
+                SourceDatabase = match.Database;
+            }
+        }
+        finally { _suspendRebuild = false; }
+
         RefreshProfiles();
         RebuildTargets();
         SyncSelectedEndpoint();
@@ -475,6 +499,42 @@ public sealed partial class BatchViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Builds a <see cref="BatchPreviewViewModel"/> for the given row,
+    /// combining the current source with every ticked target. Used by
+    /// the row's eye icon to open a side-by-side SQL preview before the
+    /// user clicks Execute. Returns null when the source isn't set —
+    /// nothing to preview against. Connection strings are resolved once
+    /// here so the preview window can work even after the source/target
+    /// selection changes underneath it.
+    /// </summary>
+    public BatchPreviewViewModel? BuildPreview(BatchItem item)
+    {
+        if (item is null || string.IsNullOrWhiteSpace(item.Name)) return null;
+        if (string.IsNullOrWhiteSpace(SourceEnv) || string.IsNullOrWhiteSpace(SourceDatabase))
+            return null;
+
+        var endpoints = new List<PreviewEndpoint>();
+
+        var srcConn = _svc.Connections.Get(SourceEnv!, SourceDatabase!) ?? "";
+        endpoints.Add(new PreviewEndpoint(
+            Label:            $"Source · {SourceEnv} / {SourceDatabase}",
+            Color:            SourceProfile?.Color,
+            ConnectionString: srcConn));
+
+        foreach (var t in Targets.Where(t => t.IsChecked))
+        {
+            var tgtConn  = _svc.Connections.Get(t.Environment, t.Database) ?? "";
+            var profile  = _svc.Connections.GetProfile(t.Environment, t.Database);
+            endpoints.Add(new PreviewEndpoint(
+                Label:            $"Target · {t.Environment} / {t.Database}",
+                Color:            profile?.Color,
+                ConnectionString: tgtConn));
+        }
+
+        return new BatchPreviewViewModel(_svc, item.Name.Trim(), endpoints);
+    }
+
+    /// <summary>
     /// Append items from clipboard / external paste. Splits on CR/LF,
     /// trims each line, drops blanks, and skips entries that are
     /// already in <see cref="Items"/> (case-insensitive on Name) so a
@@ -602,6 +662,10 @@ public sealed partial class BatchViewModel : ObservableObject
         var batchBackupPaths = new List<string>();
 
         IsBusy = true; SuccessCount = FailCount = 0;
+        // ONE stamp for the whole batch click — every source + target
+        // backup file lands under the same {date}\{stamp}_*\... tree so
+        // a Scripts-pane revert can target one folder and run cleanly.
+        var batchRunStamp = Base.It.Core.Backup.FileBackupStore.NewRunStamp();
         try
         {
             foreach (var item in Items.ToList())
@@ -614,6 +678,25 @@ public sealed partial class BatchViewModel : ObservableObject
                 try
                 {
                     var id = ObjectIdentifier.Parse(item.Name.Trim());
+
+                    // Capture this row's source backup ONCE before the
+                    // target loop, into the batch's run-folder. Without
+                    // this, every target call would re-write the same
+                    // source content under the source-env folder.
+                    string? rowSourceBackup = null;
+                    try
+                    {
+                        var srcOutcome = await _svc.Backup.BackupAsync(
+                            srcConn!, SourceEnv!, id,
+                            role: Base.It.Core.Backup.BackupRole.Source,
+                            runStamp: batchRunStamp);
+                        if (srcOutcome.Kind == Base.It.Core.Backup.BackupOutcomeKind.Written)
+                        {
+                            rowSourceBackup = srcOutcome.FilePath;
+                            if (rowSourceBackup is not null) batchBackupPaths.Add(rowSourceBackup);
+                        }
+                    }
+                    catch { /* best-effort — sync still runs even if pre-capture failed */ }
 
                     foreach (var t in checkedTargets)
                     {
@@ -628,10 +711,13 @@ public sealed partial class BatchViewModel : ObservableObject
                             // zipPair: false — Batch produces one consolidated
                             // zip after every item finishes, so per-target
                             // pair zips would be duplicative noise.
+                            // captureSourceBackup: false — we already wrote
+                            // the source-side backup once above.
                             var r = await _svc.Sync.SyncAsync(
                                 srcConn!, tgtConn!, id, SourceEnv!, t.Environment,
-                                ct: default, zipPair: false);
-                            if (r.SourceBackupPath is not null) batchBackupPaths.Add(r.SourceBackupPath);
+                                ct: default, zipPair: false,
+                                captureSourceBackup: false,
+                                runStamp: batchRunStamp);
                             if (r.TargetBackupPath is not null) batchBackupPaths.Add(r.TargetBackupPath);
                             switch (r.Status)
                             {
@@ -756,6 +842,9 @@ public sealed partial class BatchViewModel : ObservableObject
         { Status = "No source or target connection configured."; return; }
 
         IsBusy = true; SuccessCount = FailCount = 0;
+        // One stamp for the whole Backup click — same grouping rule as
+        // Execute, just without ALTER on targets.
+        var backupRunStamp = Base.It.Core.Backup.FileBackupStore.NewRunStamp();
         try
         {
             foreach (var item in Items.ToList())
@@ -769,7 +858,10 @@ public sealed partial class BatchViewModel : ObservableObject
 
                     if (!string.IsNullOrWhiteSpace(srcConn))
                     {
-                        var r = await _svc.Backup.BackupAsync(srcConn!, SourceEnv!, id);
+                        var r = await _svc.Backup.BackupAsync(
+                            srcConn!, SourceEnv!, id,
+                            role: Base.It.Core.Backup.BackupRole.Source,
+                            runStamp: backupRunStamp);
                         Tally(r, msgs, ref hits, ref misses, SourceEnv!);
                     }
 
@@ -777,7 +869,10 @@ public sealed partial class BatchViewModel : ObservableObject
                     {
                         var conn = _svc.Connections.Get(t.Environment, t.Database);
                         if (string.IsNullOrWhiteSpace(conn)) continue;
-                        var r = await _svc.Backup.BackupAsync(conn!, t.Environment, id);
+                        var r = await _svc.Backup.BackupAsync(
+                            conn!, t.Environment, id,
+                            role: Base.It.Core.Backup.BackupRole.Target,
+                            runStamp: backupRunStamp);
                         Tally(r, msgs, ref hits, ref misses, $"{t.Environment}·{t.Database}");
                     }
 

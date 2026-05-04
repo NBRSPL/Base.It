@@ -1,0 +1,189 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Base.It.App.ViewModels"
+             x:Class="Base.It.App.Views.ScriptsView"
+             x:DataType="vm:ScriptsViewModel">
+
+    <!-- Layout intent (matches Batch's compactness):
+           Row 0  context: target popover + action buttons
+           Row 1  ITEMS area: file picker buttons inline + drop zone /
+                  custom header / DataGrid
+           Row 2  status text -->
+    <DockPanel>
+        <ProgressBar DockPanel.Dock="Top" Classes="pageLoader" IsVisible="{Binding IsBusy}"/>
+
+        <Grid RowDefinitions="Auto,*,Auto">
+
+            <!-- ─────────── Row 0: targets + actions ─────────── -->
+            <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
+
+                    <!-- Targets popover (same pattern as Batch) -->
+                    <Button Grid.Column="0" Padding="10,4" MinHeight="30"
+                            ToolTip.Tip="Targets — pick one or more endpoints to run the scripts against.">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="Targets" FontSize="12"/>
+                            <Border Classes="countPill">
+                                <TextBlock Text="{Binding TargetSelectedCount}"/>
+                            </Border>
+                            <TextBlock Text="▾" FontSize="11" Opacity="0.6"/>
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="Bottom">
+                                <StackPanel Spacing="8" MinWidth="360">
+                                    <Grid ColumnDefinitions="*,Auto,Auto">
+                                        <TextBox Grid.Column="0"
+                                                 Text="{Binding TargetFilter, Mode=TwoWay}"
+                                                 Watermark="Filter"/>
+                                        <Button  Grid.Column="1" Margin="6,0,0,0"
+                                                 Content="Select all visible"
+                                                 Command="{Binding SelectAllVisibleTargetsCommand}"/>
+                                        <Button  Grid.Column="2" Margin="4,0,0,0"
+                                                 Content="Clear"
+                                                 Command="{Binding ClearTargetsCommand}"/>
+                                    </Grid>
+                                    <ScrollViewer MaxHeight="320"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl ItemsSource="{Binding FilteredTargets}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel Orientation="Horizontal"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="vm:TargetPickVm">
+                                                    <ToggleButton Classes="chip"
+                                                                  Content="{Binding Label}"
+                                                                  IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
+
+                    <!-- spacer @ col 1 -->
+
+                    <Button Grid.Column="2" MinWidth="120" Content="+ Add files…"
+                            Click="OnAddFilesClick"
+                            ToolTip.Tip="Pick one or more .sql files."/>
+                    <Button Grid.Column="3" Margin="4,0,0,0" MinWidth="120" Content="+ Add folder…"
+                            Click="OnAddFolderClick"
+                            ToolTip.Tip="Pick a folder — every .sql below it is added (recursive)."/>
+                    <Button Grid.Column="4" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
+                            Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
+                    <Button Grid.Column="5" Margin="4,0,0,0" MinWidth="64" Content="Clear"
+                            Command="{Binding ClearCommand}"/>
+                </Grid>
+            </Border>
+
+            <!-- ─────────── Row 1: items area ─────────── -->
+            <Border Grid.Row="1" Classes="card" Padding="0" ClipToBounds="True"
+                    DragDrop.AllowDrop="True">
+                <DockPanel>
+                    <!-- Status filter / counters at the top of the items card. -->
+                    <Border DockPanel.Dock="Top"
+                            Background="{DynamicResource App.ToolbarBgBrush}"
+                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="10,6">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                            <TextBlock Grid.Column="0" Text="Files" VerticalAlignment="Center"
+                                       FontSize="11" Opacity="0.7" Margin="0,0,8,0"/>
+                            <!-- spacer @ col 1 -->
+                            <Button Grid.Column="2" Margin="0,0,4,0" Padding="8,2" MinHeight="26"
+                                    Content="Remove selected"
+                                    Command="{Binding RemoveCheckedCommand}"
+                                    ToolTip.Tip="Remove rows whose checkbox is ticked."/>
+                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="12,0,12,0"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource SystemFillColorSuccessBrush}"
+                                       Text="{Binding SuccessCount, StringFormat='OK: {0}'}"/>
+                            <TextBlock Grid.Column="4" VerticalAlignment="Center"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                       Text="{Binding FailCount, StringFormat='Fail: {0}'}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Custom column header. Widths: 44 (checkbox), 50 (#),
+                         * (file), 100 (status), 2* (message). -->
+                    <Border DockPanel.Dock="Top"
+                            Background="{DynamicResource App.ElevatedBgBrush}"
+                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                            BorderThickness="0,0,0,1">
+                        <Grid ColumnDefinitions="44,50,*,100,2*" Margin="0,7">
+                            <TextBlock Grid.Column="1" Text="#" FontSize="11" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                            <TextBlock Grid.Column="2" Text="File" FontSize="11" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Margin="6,0,0,0"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                            <TextBlock Grid.Column="3" Text="Status" FontSize="11" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Margin="6,0,0,0"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                            <TextBlock Grid.Column="4" Text="Message" FontSize="11" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Margin="6,0,0,0"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Items grid. Empty-state drop hint is overlaid via the
+                         Grid below; visibility flips by Items.Count. -->
+                    <Grid>
+                        <DataGrid x:Name="ItemsGrid" ItemsSource="{Binding Items}"
+                                  AutoGenerateColumns="False"
+                                  HeadersVisibility="None"
+                                  GridLinesVisibility="Horizontal"
+                                  CanUserReorderColumns="False"
+                                  SelectionMode="Extended"
+                                  ClipboardCopyMode="ExcludeHeader">
+                            <DataGrid.Columns>
+                                <DataGridTemplateColumn Header="" Width="44" CanUserResize="False" CanUserSort="False">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate DataType="vm:ScriptItem">
+                                            <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                      Margin="0" Padding="0" MinWidth="0"/>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="#"      Binding="{Binding Index}"    Width="50"  IsReadOnly="True"/>
+                                <DataGridTextColumn Header="File"   Binding="{Binding FilePath}" Width="*"   IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}"   Width="100" IsReadOnly="True"/>
+                                <DataGridTextColumn Header="Msg"    Binding="{Binding Message}"  Width="2*"  IsReadOnly="True"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+
+                        <!-- Empty-state drop overlay. Visible only when
+                             Items is empty; click-through to the grid
+                             once files arrive. -->
+                        <Border Background="{DynamicResource App.ElevatedBgBrush}"
+                                Padding="20"
+                                IsHitTestVisible="False"
+                                IsVisible="{Binding !Items.Count}">
+                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="6">
+                                <TextBlock Text="📄"
+                                           FontSize="32" HorizontalAlignment="Center"
+                                           Opacity="0.5"/>
+                                <TextBlock Text="Drop .sql files or a folder here"
+                                           HorizontalAlignment="Center" FontSize="13"
+                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                <TextBlock Text="…or use Add files / Add folder above."
+                                           HorizontalAlignment="Center" FontSize="11"
+                                           Foreground="{DynamicResource App.TextMutedBrush}"/>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                </DockPanel>
+            </Border>
+
+            <Border Grid.Row="2" Classes="pageStatus">
+                <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

@@ -8,7 +8,12 @@
     <DockPanel>
         <ProgressBar DockPanel.Dock="Top" Classes="pageLoader" IsVisible="{Binding IsBusy}"/>
 
-    <Grid RowDefinitions="Auto,*,Auto,3*,Auto">
+    <!-- Rows: toolbar | query | splitter | results | status.
+         Query and Results are *,* so they share the leftover height
+         50/50 by default; the GridSplitter between them is draggable
+         either way. MinHeight=80 on each so neither pane can be
+         dragged to invisibility. -->
+    <Grid RowDefinitions="Auto,*,Auto,*,Auto">
 
         <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
             <Grid ColumnDefinitions="170,Auto,*,Auto">
@@ -47,23 +52,37 @@
         </Border>
 
         <!-- Query editor -->
-        <Border Grid.Row="1" Classes="card" Padding="0">
+        <Border Grid.Row="1" Classes="card" Padding="0" MinHeight="80">
             <TextBox Text="{Binding Query}" AcceptsReturn="True" AcceptsTab="True"
                      TextWrapping="NoWrap" Classes="mono" FontSize="13"
-                     Watermark="-- T-SQL here"
+                     Watermark="T-SQL"
                      VerticalContentAlignment="Top" Padding="10,6"
                      BorderThickness="0" Background="Transparent"/>
         </Border>
 
-        <TextBlock Grid.Row="2" Text="Results" Classes="sectionTitle" Margin="2,8,0,4"/>
+        <!-- Drag handle between query and results. 6px tall, transparent
+             background but the splitter still hit-tests; cursor turns
+             into the row-resize affordance on hover. -->
+        <GridSplitter Grid.Row="2"
+                      Height="6"
+                      HorizontalAlignment="Stretch"
+                      ResizeDirection="Rows"
+                      Background="Transparent"
+                      ShowsPreview="False"
+                      Margin="0,4"/>
 
         <!-- Results area: the display -->
-        <Border Grid.Row="3" Classes="card" Padding="0">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto"
-                          VerticalScrollBarVisibility="Auto">
-                <SelectableTextBlock Text="{Binding Results}" Classes="mono"
-                                     Padding="10,6" TextWrapping="NoWrap"/>
-            </ScrollViewer>
+        <Border Grid.Row="3" Classes="card" Padding="0" MinHeight="80">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top"
+                           Text="Results" Classes="sectionTitle"
+                           Margin="10,8,10,4"/>
+                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto">
+                    <SelectableTextBlock Text="{Binding Results}" Classes="mono"
+                                         Padding="10,4,10,8" TextWrapping="NoWrap"/>
+                </ScrollViewer>
+            </DockPanel>
         </Border>
 
         <Border Grid.Row="4" Classes="pageStatus">

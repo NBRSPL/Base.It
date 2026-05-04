@@ -26,6 +26,7 @@
                 <ui:NavigationViewItem Content="Compare" Tag="Compare" IconSource="AllApps"/>
                 <ui:NavigationViewItem Content="Sync"    Tag="Sync"    IconSource="Sync"/>
                 <ui:NavigationViewItem Content="Batch"   Tag="Batch"   IconSource="List"/>
+                <ui:NavigationViewItem Content="Scripts" Tag="Scripts" IconSource="Document"/>
                 <ui:NavigationViewItem Content="Query"   Tag="Query"   IconSource="Find"/>
                 <ui:NavigationViewItem Content="Watch"   Tag="Watch"   IconSource="View"/>
             </ui:NavigationView.MenuItems>
@@ -80,36 +81,67 @@
 
                 <!-- Top bar: fetch dock on the left, active-group picker on the
                      right (theme toggle is in the nav pane footer now). -->
-                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,140" Margin="0,0,0,10">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
                     <v:FetchDockView Grid.Column="0" DataContext="{Binding FetchDock}"/>
 
-                    <Border x:Name="GroupSelector" Grid.Column="1" Classes="toolbar" Margin="0,0,8,0"
+                    <!-- Connection-group picker: searchable AutoCompleteBox.
+                         "All connections" sits at the top of the list and
+                         clears the filter; type-to-search filters by group
+                         name. MinimumPrefixLength=0 so a single click opens
+                         the dropdown without typing first. -->
+                    <Border x:Name="GroupSelector" Grid.Column="1" Margin="6,0,0,0"
                             VerticalAlignment="Center">
-                        <Grid ColumnDefinitions="Auto,Auto,Auto">
-                            <TextBlock Grid.Column="0" Text="Group"
-                                       VerticalAlignment="Center" FontSize="12"
-                                       Foreground="{DynamicResource App.TextSecondaryBrush}"
-                                       Margin="0,0,8,0"/>
-                            <ComboBox Grid.Column="1" Width="180"
-                                      ItemsSource="{Binding ConnectionGroups}"
-                                      SelectedItem="{Binding ActiveConnectionGroup}"
-                                      PlaceholderText="All connections">
-                                <ComboBox.ItemTemplate>
-                                    <DataTemplate DataType="cfg:ConnectionGroup">
-                                        <TextBlock Text="{Binding Name}"/>
-                                    </DataTemplate>
-                                </ComboBox.ItemTemplate>
-                            </ComboBox>
-                            <Button Grid.Column="2" Margin="4,0,0,0" Content="Clear"
-                                    Command="{Binding ClearActiveGroupCommand}"
-                                    ToolTip.Tip="Show every configured connection (no group filter)"/>
-                        </Grid>
+                        <AutoCompleteBox Width="220" MinHeight="30"
+                                         ItemsSource="{Binding ConnectionGroupOptions}"
+                                         SelectedItem="{Binding SelectedConnectionGroupOption, Mode=TwoWay}"
+                                         FilterMode="Contains"
+                                         MinimumPrefixLength="0"
+                                         Watermark="Connection group"
+                                         ToolTip.Tip="Active connection group — pickers across the app filter to this group's members. Pick 'All connections' to drop the filter.">
+                            <AutoCompleteBox.ItemTemplate>
+                                <DataTemplate DataType="vm:ConnectionGroupOption">
+                                    <TextBlock Text="{Binding Name}" FontSize="12"/>
+                                </DataTemplate>
+                            </AutoCompleteBox.ItemTemplate>
+                        </AutoCompleteBox>
                     </Border>
                 </Grid>
 
                 <ui:Frame x:Name="Host" Grid.Row="1" Padding="0"/>
             </Grid>
         </ui:NavigationView>
+
+        <!-- Find overlay: browser-style Ctrl+F popup. Hidden by default,
+             shown when Ctrl+F is pressed anywhere in the window. Type to
+             filter the active view; Esc / X closes and clears. The
+             overlay floats top-right over the active page so it never
+             reflows the content underneath. -->
+        <Border x:Name="FindOverlay"
+                IsVisible="False"
+                HorizontalAlignment="Right" VerticalAlignment="Top"
+                Margin="0,52,16,0"
+                Padding="10,6"
+                Background="{DynamicResource App.ElevatedBgBrush}"
+                BorderBrush="{DynamicResource App.StrokeStrongBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                BoxShadow="0 6 20 0 #40000000">
+            <Grid ColumnDefinitions="Auto,Auto,Auto" VerticalAlignment="Center">
+                <TextBlock Grid.Column="0" Text="Find" FontSize="11" Opacity="0.7"
+                           VerticalAlignment="Center" Margin="0,0,8,0"/>
+                <TextBox Grid.Column="1" x:Name="FindBox"
+                         Width="240" MinHeight="26"
+                         Watermark="Type to filter the current page"
+                         KeyDown="OnFindBoxKeyDown"
+                         TextChanged="OnFindBoxTextChanged"/>
+                <Button  Grid.Column="2" Margin="6,0,0,0"
+                         Padding="6,2" MinWidth="0" MinHeight="26"
+                         Click="OnFindClose"
+                         ToolTip.Tip="Close (Esc)">
+                    <TextBlock Text="✕" FontSize="11"/>
+                </Button>
+            </Grid>
+        </Border>
 
         <v:ToastHost x:Name="Toasts" DataContext="{Binding Services.Toasts}"/>
     </Panel>

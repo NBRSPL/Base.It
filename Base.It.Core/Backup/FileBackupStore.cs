@@ -4,13 +4,37 @@ using Base.It.Core.Models;
 namespace Base.It.Core.Backup;
 
 /// <summary>
-/// Writes object definitions to a backup root using a date/env/objectType layout.
+/// Distinguishes who an object's backup file represents — used by the
+/// backup folder name so a folder full of <c>.sql</c> files reads as
+/// "source-side state of PROD" or "target-side pre-sync state of DEV"
+/// at a glance, with no timestamp parsing required.
+/// </summary>
+public enum BackupRole
+{
+    /// <summary>The source environment the sync was pulling FROM.</summary>
+    Source,
+    /// <summary>A target environment captured BEFORE the sync ran (revert candidate).</summary>
+    Target,
+    /// <summary>Standalone capture (no sync involved) — manual Backup button.</summary>
+    Manual,
+}
+
+/// <summary>
+/// Writes object definitions to a backup root using a run-grouped layout
+/// designed to make the Scripts pane's "load + execute" workflow safe:
 ///
-///   {Root}\{yyyy-MM-dd}\{env}\{ObjectType}\{Name}_{HHmmssfff}.sql
+///   {Root}\{yyyy-MM-dd}\{runStamp}_{role}_{env}\{ObjectType}\{Name}.sql
 ///
-/// Files are named after the SQL object itself (schema prefix stripped — the
-/// default 'dbo' adds no information) with a millisecond timestamp suffix so
-/// repeated captures never overwrite each other.
+/// One run (one Sync / Batch / Backup click) shares a single
+/// <c>runStamp</c> (HHmmssfff). All files for that run land under
+/// per-role / per-env folders named with that stamp. Each role/env
+/// folder contains exactly one file per object — no timestamp suffixes
+/// inside the file name — so the Scripts pane can pick a folder and
+/// re-execute it without duplicate-object hazards.
+///
+/// Cross-run uniqueness is handled by the stamp; within-run name
+/// collisions (rare: same object captured twice in the same run) get a
+/// trailing <c>_2</c>, <c>_3</c> suffix so nothing is overwritten.
 /// </summary>
 public sealed class FileBackupStore
 {
@@ -19,14 +43,6 @@ public sealed class FileBackupStore
     public FileBackupStore(string root) { _root = root; Directory.CreateDirectory(_root); }
     public string Root => _root;
 
-    /// <summary>
-    /// Re-point the store at a different folder at runtime (used when the
-    /// user changes the backup location in Settings). Creates the folder
-    /// if it doesn't exist. Throws if the path is blank or we can't create
-    /// the directory — the caller surfaces the error to the user.
-    /// Existing files at the old location are NOT moved or deleted; the
-    /// switch is only for future writes.
-    /// </summary>
     public void SetRoot(string root)
     {
         if (string.IsNullOrWhiteSpace(root))
@@ -35,32 +51,56 @@ public sealed class FileBackupStore
         _root = root;
     }
 
-    public string WriteObject(string environment, SqlObjectType type, ObjectIdentifier id, string definition)
-    {
-        var now  = DateTime.Now;
-        var date = now.ToString("yyyy-MM-dd");
-        var time = now.ToString("HHmmssfff");
+    /// <summary>
+    /// Generate a fresh run-stamp (HHmmssfff). Callers should generate
+    /// one at the start of an operation and pass it to every
+    /// <see cref="WriteObject"/> call in that operation so all artifacts
+    /// land in the same run-folder.
+    /// </summary>
+    public static string NewRunStamp() => DateTime.Now.ToString("HHmmssfff");
 
-        // Folder: {date}/{env}/{ObjectType}/   — env and object type are
-        // categorical groupings, not part of the file name.
-        var envSegment    = SanitizeSegment(environment);
-        var typeSegment   = SanitizeSegment(type.ToString());
-        var dir = Path.Combine(_root, date, envSegment, typeSegment);
+    /// <summary>
+    /// Write a single object's definition to the run-grouped layout.
+    /// </summary>
+    public string WriteObject(
+        string runStamp,
+        BackupRole role,
+        string environment,
+        SqlObjectType type,
+        ObjectIdentifier id,
+        string definition)
+    {
+        if (string.IsNullOrWhiteSpace(runStamp))
+            runStamp = NewRunStamp();
+
+        var date = DateTime.Now.ToString("yyyy-MM-dd");
+        var roleSlug = role switch
+        {
+            BackupRole.Source => "source",
+            BackupRole.Target => "target",
+            _                 => "manual",
+        };
+        var envSegment  = SanitizeSegment(environment);
+        var folderName  = $"{runStamp}_{roleSlug}_{envSegment}";
+        var typeSegment = SanitizeSegment(type.ToString());
+        var dir = Path.Combine(_root, date, folderName, typeSegment);
         Directory.CreateDirectory(dir);
 
-        // Filename starts with the object's own name; schema is dropped
-        // unless it's something other than the default 'dbo'.
+        // Filename = the object's own identifier (schema kept only when
+        // it isn't the default 'dbo'). No timestamp — the run-folder is
+        // already unique, so the file name stays clean.
         var nameSegment = SanitizeSegment(
             string.Equals(id.Schema, "dbo", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(id.Schema)
                 ? id.Name
                 : $"{id.Schema}.{id.Name}");
 
-        var file = Path.Combine(dir, $"{nameSegment}_{time}.sql");
-        // Ms stamp effectively prevents collisions; belt-and-braces counter
-        // suffix in the pathological same-ms case rather than overwrite.
+        var file = Path.Combine(dir, $"{nameSegment}.sql");
+        // Same-run, same-object collisions only happen if the caller
+        // captures one object twice in one run. Defensive: never
+        // overwrite an existing file.
         int n = 1;
         while (File.Exists(file))
-            file = Path.Combine(dir, $"{nameSegment}_{time}_{n++}.sql");
+            file = Path.Combine(dir, $"{nameSegment}_{n++}.sql");
 
         File.WriteAllText(file, definition);
         return file;
@@ -68,9 +108,10 @@ public sealed class FileBackupStore
 
     /// <summary>
     /// Packages all backup files for a batch run into a single zip under
-    /// today's date folder, preserving the <c>{env}\{type}\{name}.sql</c>
-    /// structure inside the archive. Named uniquely with a millisecond
-    /// timestamp — never overwrites an existing zip.
+    /// today's date folder. Preserves the
+    /// <c>{runStamp}_{role}_{env}\{type}\{name}.sql</c> structure inside
+    /// the archive. Named uniquely with a millisecond timestamp — never
+    /// overwrites an existing zip.
     /// </summary>
     public string CreateBatchZip(string zipName, IEnumerable<string> files)
     {
@@ -83,15 +124,10 @@ public sealed class FileBackupStore
         while (File.Exists(zipPath))
             zipPath = Path.Combine(dateRoot, Path.GetFileNameWithoutExtension(zipName) + $"_{n++}.zip");
 
-        // Materialize the distinct, existing file list so the archive sees
-        // each backup at most once even if source+target duplicates slip in.
         var unique = files.Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         using var archive = ZipFile.Open(zipPath, ZipArchiveMode.Create);
         foreach (var f in unique)
         {
-            // Entry path: relative to the date folder, falls back to the
-            // plain filename if the file lives outside the backup root
-            // (defensive — shouldn't happen in practice).
             var entry = f.StartsWith(dateRoot, StringComparison.OrdinalIgnoreCase)
                 ? Path.GetRelativePath(dateRoot, f)
                 : Path.GetFileName(f);
@@ -101,14 +137,11 @@ public sealed class FileBackupStore
     }
 
     /// <summary>
-    /// Packages a set of already-written backup files into a single zip in the
-    /// same date/object folder. Never deletes or overwrites an existing zip;
-    /// a unique millisecond stamp is part of the zip name.
+    /// Packages a small set of files into a zip in the same run folder
+    /// as the first input. Never deletes or overwrites an existing zip.
     /// </summary>
     public string ZipFiles(string zipName, params string[] files)
     {
-        // Put the zip next to the source files when possible so related
-        // artifacts stay together.
         string zipDir = files.Length > 0 && !string.IsNullOrEmpty(Path.GetDirectoryName(files[0]))
             ? Path.GetDirectoryName(files[0])!
             : _root;

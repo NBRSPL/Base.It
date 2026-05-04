@@ -5,262 +5,324 @@
              x:Class="Base.It.App.Views.BatchView"
              x:DataType="vm:BatchViewModel">
 
-    <!-- Rows:
-         0  Profile bar (saved source/target presets)
-         1  Source + badge
-         2  Targets checklist
-         3  Objects toolbar (file loader + Backup/Execute/Clear/Remove)
-         4  DACPAC opt-in (collapsed when not configured)
-         5  Status + name filters + counters
-         6  Items card: QuickAdd row + DataGrid
-         7  Status bar -->
+    <!-- Layout intent: the items grid is the main view. Everything else is
+         compressed to thin top bars so the data dominates the screen.
+           Row 0  context: profile · source · swap · targets
+           Row 1  actions: file load · DACPAC · backup / execute / clear / remove
+           Row 2  ITEMS: filter strip + custom header + QuickAdd + DataGrid
+           Row 3  status text -->
     <DockPanel>
-        <!-- Slim indeterminate progress bar docked to the top of the pane. -->
         <ProgressBar DockPanel.Dock="Top" Classes="pageLoader" IsVisible="{Binding IsBusy}"/>
 
-    <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*,Auto">
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
 
-        <!-- Row 0: Profile bar — saved (source, targets) tuples. -->
-        <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto">
-                <TextBlock Grid.Column="0" Text="Profile" VerticalAlignment="Center"
-                           Margin="0,0,8,0" FontSize="12" Opacity="0.7"/>
-                <ComboBox Grid.Column="1" Width="260"
-                          ItemsSource="{Binding Profiles}"
-                          SelectedItem="{Binding SelectedProfile}"
-                          PlaceholderText="None — pick a saved pair">
-                    <ComboBox.ItemTemplate>
-                        <DataTemplate DataType="vm:EndpointProfile">
-                            <TextBlock Text="{Binding Name}"/>
-                        </DataTemplate>
-                    </ComboBox.ItemTemplate>
-                </ComboBox>
-                <Button   Grid.Column="2" Margin="6,0,0,0" Content="Save as profile…"
-                          Command="{Binding SaveAsProfileCommand}"
-                          ToolTip.Tip="Save the current source + ticked targets as a reusable profile."/>
-                <Button   Grid.Column="3" Margin="4,0,0,0" Content="Delete"
-                          Command="{Binding DeleteProfileCommand}"
-                          IsEnabled="{Binding SelectedProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
-                          ToolTip.Tip="Delete the selected profile. Connections aren't affected."/>
-                <!-- spacer @ col 4 -->
-                <Button   Grid.Column="5" Content="⇄ Swap"
-                          Command="{Binding SwapCommand}"
-                          IsEnabled="{Binding CanSwap}"
-                          ToolTip.Tip="Swap source with the single ticked target. Enabled only when exactly one target is ticked."/>
-            </Grid>
-        </Border>
+            <!-- ──────────────────── Row 0: context bar ──────────────────── -->
+            <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
 
-        <!-- Row 1: source — single AutoCompleteBox (replaces cascading env / db dropdowns). -->
-        <Border Grid.Row="1" Classes="toolbar" Margin="0,0,0,6">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
-                <TextBlock Grid.Column="0" Text="Source" VerticalAlignment="Center"
-                           Margin="0,0,8,0" FontSize="12" Opacity="0.7"/>
-                <AutoCompleteBox Grid.Column="1" x:Name="SourceBox" MinWidth="280"
-                                 ItemsSource="{Binding Endpoints}"
-                                 SelectedItem="{Binding SelectedSourceEndpoint, Mode=TwoWay}"
-                                 Watermark="Type to filter — name, ENV or database">
-                    <AutoCompleteBox.ItemTemplate>
-                        <DataTemplate DataType="vm:EndpointPick">
-                            <Grid ColumnDefinitions="Auto,*" Margin="0,2">
-                                <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
-                                         Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
-                                         Margin="0,0,8,0"/>
-                                <StackPanel Grid.Column="1">
-                                    <TextBlock Text="{Binding Label}" FontSize="12"/>
-                                    <TextBlock Text="{Binding SubLabel}"
-                                               FontSize="10" Opacity="0.55"
-                                               IsVisible="{Binding ShowSubLabel}"/>
+                    <!-- Profile: tucked into a star button. Click opens a flyout
+                         with the saved-pair combo + Save / Delete actions. -->
+                    <Button Grid.Column="0" Padding="10,4" MinHeight="30"
+                            ToolTip.Tip="Profiles — saved source/target pairs">
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <TextBlock Text="★" FontSize="13" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource App.AccentBrush}"/>
+                            <TextBlock Text="Profile" FontSize="12" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="Bottom">
+                                <StackPanel Spacing="8" MinWidth="280">
+                                    <TextBlock Text="Saved source/target pairs"
+                                               FontSize="11" Opacity="0.7"/>
+                                    <ComboBox ItemsSource="{Binding Profiles}"
+                                              SelectedItem="{Binding SelectedProfile}"
+                                              HorizontalAlignment="Stretch"
+                                              PlaceholderText="None — pick a saved pair">
+                                        <ComboBox.ItemTemplate>
+                                            <DataTemplate DataType="vm:EndpointProfile">
+                                                <TextBlock Text="{Binding Name}"/>
+                                            </DataTemplate>
+                                        </ComboBox.ItemTemplate>
+                                    </ComboBox>
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Button Content="Save current…"
+                                                Command="{Binding SaveAsProfileCommand}"/>
+                                        <Button Content="Delete"
+                                                Command="{Binding DeleteProfileCommand}"
+                                                IsEnabled="{Binding SelectedProfile, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                                    </StackPanel>
+                                    <TextBlock Classes="subtle" TextWrapping="Wrap"
+                                               Text="Picking a profile sets source + ticks the saved targets in one click."/>
                                 </StackPanel>
-                            </Grid>
-                        </DataTemplate>
-                    </AutoCompleteBox.ItemTemplate>
-                </AutoCompleteBox>
-                <Border Grid.Column="2" Classes="badge"
-                        Background="{Binding SourceProfile.Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
-                        IsVisible="{Binding SourceProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
-                        VerticalAlignment="Center" Margin="8,0,0,0">
-                    <TextBlock Text="{Binding SourceProfile.Label}"/>
-                </Border>
-                <!-- flex spacer @ col 3 -->
-            </Grid>
-        </Border>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
 
-        <!-- Targets — chip-style ToggleButtons with a filter / select-all /
-             clear bar above. Mirrors the Sync pane so the two panes feel
-             identical. FilteredTargets is the bound view; TargetFilter
-             reactively narrows it. -->
-        <Border Grid.Row="2" Classes="toolbar" Margin="0,0,0,6">
-            <StackPanel Spacing="6">
-                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
-                    <TextBlock Grid.Column="0" Text="Targets" VerticalAlignment="Center"
-                               Margin="0,0,10,0" FontSize="12" Opacity="0.7"/>
-                    <TextBox  Grid.Column="1" Width="220" MinHeight="28"
-                              Text="{Binding TargetFilter, Mode=TwoWay}"
-                              Watermark="Filter — name, ENV or database"/>
-                    <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="12,0,12,0"
-                               FontSize="11" Opacity="0.55"
-                               Text="{Binding TargetSelectedCount, StringFormat='{}{0} selected'}"/>
-                    <Button   Grid.Column="3" Content="Select all visible"
-                              Command="{Binding SelectAllVisibleTargetsCommand}"
-                              ToolTip.Tip="Tick every target currently shown by the filter."/>
-                    <Button   Grid.Column="4" Margin="4,0,0,0" Content="Clear"
-                              Command="{Binding ClearTargetsCommand}"
-                              ToolTip.Tip="Untick every target — even ones hidden by the filter."/>
-                </Grid>
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                    <ItemsControl ItemsSource="{Binding FilteredTargets}">
-                        <ItemsControl.ItemsPanel>
-                            <ItemsPanelTemplate>
-                                <WrapPanel Orientation="Horizontal"/>
-                            </ItemsPanelTemplate>
-                        </ItemsControl.ItemsPanel>
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate DataType="vm:TargetPickVm">
-                                <ToggleButton Classes="chip"
-                                              Content="{Binding Label}"
-                                              IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </ScrollViewer>
-            </StackPanel>
-        </Border>
+                    <!-- Source label + autocomplete + colour badge inline. -->
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6"
+                                Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="Source" FontSize="12" Opacity="0.7"
+                                   VerticalAlignment="Center"/>
+                        <AutoCompleteBox x:Name="SourceBox" MinWidth="260"
+                                         ItemsSource="{Binding Endpoints}"
+                                         SelectedItem="{Binding SelectedSourceEndpoint, Mode=TwoWay}"
+                                         Watermark="Source">
+                            <AutoCompleteBox.ItemTemplate>
+                                <DataTemplate DataType="vm:EndpointPick">
+                                    <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                                        <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
+                                                 Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                 Margin="0,0,8,0"/>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding Label}" FontSize="12"/>
+                                            <TextBlock Text="{Binding SubLabel}"
+                                                       FontSize="10" Opacity="0.55"
+                                                       IsVisible="{Binding ShowSubLabel}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </AutoCompleteBox.ItemTemplate>
+                        </AutoCompleteBox>
+                        <Border Classes="badge"
+                                Background="{Binding SourceProfile.Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                IsVisible="{Binding SourceProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                VerticalAlignment="Center">
+                            <TextBlock Text="{Binding SourceProfile.Label}"/>
+                        </Border>
+                    </StackPanel>
 
-        <!-- Objects toolbar — manual-object input is gone; quick-add now
-             lives as the first editable row above the items grid. The
-             file loader keeps Load + Backup + Execute + Clear + Remove. -->
-        <Border Grid.Row="3" Classes="toolbar" Margin="0,0,0,6">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*">
-                <TextBox Grid.Column="0" Width="320" Text="{Binding FilePath}"
-                         Watermark=".csv / .xlsx">
-                    <TextBox.KeyBindings>
-                        <KeyBinding Gesture="Enter" Command="{Binding LoadFromFileCommand}"/>
-                    </TextBox.KeyBindings>
-                </TextBox>
-                <Button  Grid.Column="1" Margin="4,0,0,0" MinWidth="64" Content="Load"
-                         Command="{Binding LoadFromFileCommand}"/>
-                <Button  Grid.Column="2" Margin="12,0,0,0" MinWidth="72" Content="Backup"
-                         Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
-                         ToolTip.Tip="Capture each row from source + ticked targets without altering anything."/>
-                <Button  Grid.Column="3" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
-                         Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
-                <Button  Grid.Column="4" Margin="4,0,0,0" MinWidth="64" Content="Clear"
-                         Command="{Binding ClearCommand}"
-                         ToolTip.Tip="Remove every row from the list."/>
-                <Button  Grid.Column="5" Margin="4,0,0,0" MinWidth="120" Content="Remove selected"
-                         Command="{Binding RemoveCheckedCommand}"
-                         ToolTip.Tip="Remove rows whose checkbox (left-most column) is ticked."/>
-            </Grid>
-        </Border>
+                    <!-- spacer @ col 2 keeps swap+targets hugging the right edge of the source group -->
 
-        <!-- DACPAC opt-in -->
-        <Border Grid.Row="4" Classes="toolbar" Margin="0,0,0,6"
-                IsVisible="{Binding DacpacConfigured}">
-            <Grid ColumnDefinitions="Auto,*,Auto">
-                <CheckBox Grid.Column="0" Content="Write to DACPAC folder"
-                          IsChecked="{Binding StageAsDacpacBranch}"
-                          IsEnabled="{Binding !IsBusy}"
-                          ToolTip.Tip="After each successful sync, write the object's definition to the configured DACPAC / SSDT folder. No git actions are taken — commit the changes yourself."/>
-                <TextBlock Grid.Column="2" FontSize="11" Opacity="0.55" VerticalAlignment="Center"
-                           Text="configured in Settings → DACPAC"/>
-            </Grid>
-        </Border>
+                    <!-- Swap source ↔ single ticked target. Compact icon button. -->
+                    <Button Grid.Column="3" Padding="8,4" MinHeight="30" Margin="6,0,0,0"
+                            Command="{Binding SwapCommand}"
+                            IsEnabled="{Binding CanSwap}"
+                            ToolTip.Tip="Swap source with the single ticked target. Enabled only when exactly one target is ticked.">
+                        <TextBlock Text="⇄" FontSize="14"/>
+                    </Button>
 
-        <!-- Status filter + name find-box + live OK/Fail counters.
-             Ctrl+F (UserControl-level) focuses the name find-box. -->
-        <Border Grid.Row="5" Classes="toolbar" Margin="0,0,0,6">
-            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto">
-                <TextBlock Grid.Column="0" Text="Status" VerticalAlignment="Center"
-                           Margin="0,0,8,0" FontSize="12" Opacity="0.7"/>
-                <ComboBox Grid.Column="1" Width="140"
-                          ItemsSource="{Binding StatusFilterOptions}"
-                          SelectedItem="{Binding StatusFilter}"/>
-                <TextBlock Grid.Column="2" Text="Find" VerticalAlignment="Center"
-                           Margin="14,0,8,0" FontSize="12" Opacity="0.7"/>
-                <TextBox Grid.Column="3" x:Name="NameFilterBox" Width="200"
-                         Text="{Binding NameFilter, Mode=TwoWay}"
-                         Watermark="Filter by name (Ctrl+F)"/>
-                <TextBlock Grid.Column="4" VerticalAlignment="Center" Margin="12,0,12,0"
-                           FontSize="11" Opacity="0.55"
-                           Text="Rows matching status AND name. Blank = no filter."
-                           TextTrimming="CharacterEllipsis"/>
-                <TextBlock Grid.Column="5" VerticalAlignment="Center" Margin="0,0,12,0"
-                           Text="{Binding SuccessCount, StringFormat='OK: {0}'}"
-                           Foreground="{DynamicResource SystemFillColorSuccessBrush}" FontSize="11"/>
-                <TextBlock Grid.Column="6" VerticalAlignment="Center"
-                           Text="{Binding FailCount, StringFormat='Fail: {0}'}"
-                           Foreground="{DynamicResource SystemFillColorCriticalBrush}" FontSize="11"/>
-            </Grid>
-        </Border>
+                    <!-- Targets popover. Button shows the live count; flyout hosts
+                         the filter, select-all/clear, and the chip list. Frees a
+                         whole row of vertical space without losing access. -->
+                    <Button Grid.Column="4" Padding="10,4" MinHeight="30" Margin="6,0,0,0"
+                            ToolTip.Tip="Targets — pick one or more endpoints to push to.">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="Targets" FontSize="12"/>
+                            <Border Classes="countPill">
+                                <TextBlock Text="{Binding TargetSelectedCount}"/>
+                            </Border>
+                            <TextBlock Text="▾" FontSize="11" Opacity="0.6"/>
+                        </StackPanel>
+                        <Button.Flyout>
+                            <Flyout Placement="Bottom">
+                                <StackPanel Spacing="8" MinWidth="360">
+                                    <Grid ColumnDefinitions="*,Auto,Auto">
+                                        <TextBox Grid.Column="0"
+                                                 Text="{Binding TargetFilter, Mode=TwoWay}"
+                                                 Watermark="Filter"/>
+                                        <Button  Grid.Column="1" Margin="6,0,0,0"
+                                                 Content="Select all visible"
+                                                 Command="{Binding SelectAllVisibleTargetsCommand}"/>
+                                        <Button  Grid.Column="2" Margin="4,0,0,0"
+                                                 Content="Clear"
+                                                 Command="{Binding ClearTargetsCommand}"/>
+                                    </Grid>
+                                    <ScrollViewer MaxHeight="320"
+                                                  HorizontalScrollBarVisibility="Disabled"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <ItemsControl ItemsSource="{Binding FilteredTargets}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel Orientation="Horizontal"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate DataType="vm:TargetPickVm">
+                                                    <ToggleButton Classes="chip"
+                                                                  Content="{Binding Label}"
+                                                                  IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
+                                </StackPanel>
+                            </Flyout>
+                        </Button.Flyout>
+                    </Button>
 
-        <!-- Grid: Excel-like behaviour — drag/Shift/Ctrl multi-select via
-             SelectionMode=Extended, Ctrl+C copies the selection to the
-             clipboard (ClipboardCopyMode=ExcludeHeader), Ctrl+V pastes a
-             newline-separated list of names (handler in code-behind),
-             Delete removes the selected rows.
-
-             The QuickAdd box sits flush at the top of the same card so
-             it visually reads as the editable first row. Type a name +
-             Enter to add it; pasting multi-line text fans out into one
-             row per line. The Manual Object box + Add button are gone —
-             this replaces both. -->
-        <Border Grid.Row="6" Classes="card" Padding="0" ClipToBounds="True">
-          <DockPanel>
-            <!-- The QuickAdd row sits above the DataGrid header but its
-                 column structure mirrors the grid (44,50,*,100,2*) so the
-                 "+" indicator lands right under the # column header and
-                 the input lines up with the Object-name column. Visually
-                 it reads as the always-ready first row of the list. -->
-            <Border DockPanel.Dock="Top"
-                    BorderThickness="0,0,0,1"
-                    BorderBrush="{DynamicResource App.StrokeBrush}"
-                    Background="{DynamicResource App.ToolbarBgBrush}"
-                    Padding="0,6">
-                <Grid ColumnDefinitions="44,50,*,100,2*">
-                    <!-- col 0: empty (matches the checkbox column) -->
-                    <TextBlock Grid.Column="1" Text="＋"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                               FontSize="13" FontWeight="Bold"
-                               Foreground="{DynamicResource App.SuccessBrush}"
-                               ToolTip.Tip="Type a name + Enter to add. Paste a multi-line list to add many at once."/>
-                    <TextBox Grid.Column="2" Grid.ColumnSpan="3"
-                             x:Name="QuickAddBox"
-                             BorderThickness="0" Background="Transparent"
-                             Padding="0,2" MinHeight="24"
-                             VerticalContentAlignment="Center"
-                             Watermark="Type or paste object name(s) — Enter to add"
-                             KeyDown="OnQuickAddKeyDown"
-                             PastingFromClipboard="OnQuickAddPaste"/>
+                    <!-- spacer @ col 5 — keeps the row tidy at the right edge -->
                 </Grid>
             </Border>
-            <DataGrid x:Name="ItemsGrid" ItemsSource="{Binding FilteredItems}" AutoGenerateColumns="False"
-                      HeadersVisibility="Column" GridLinesVisibility="Horizontal"
-                      CanUserReorderColumns="False"
-                      SelectionMode="Extended"
-                      ClipboardCopyMode="ExcludeHeader"
-                      KeyDown="OnGridKeyDown">
-                <DataGrid.Columns>
-                    <DataGridTemplateColumn Header="" Width="44" CanUserResize="False" CanUserSort="False">
-                        <DataGridTemplateColumn.CellTemplate>
-                            <DataTemplate DataType="vm:BatchItem">
-                                <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                          HorizontalAlignment="Center" VerticalAlignment="Center"
-                                          Margin="0" Padding="0" MinWidth="0"/>
-                            </DataTemplate>
-                        </DataGridTemplateColumn.CellTemplate>
-                    </DataGridTemplateColumn>
-                    <DataGridTextColumn Header="#"           Binding="{Binding Index}"   Width="50"  IsReadOnly="True"/>
-                    <DataGridTextColumn Header="Object name" Binding="{Binding Name}"    Width="*"/>
-                    <DataGridTextColumn Header="Status"      Binding="{Binding Status}"  Width="100" IsReadOnly="True"/>
-                    <DataGridTextColumn Header="Message"     Binding="{Binding Message}" Width="2*"  IsReadOnly="True"/>
-                </DataGrid.Columns>
-            </DataGrid>
-          </DockPanel>
-        </Border>
 
-        <Border Grid.Row="7" Classes="pageStatus">
-            <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
-        </Border>
-    </Grid>
+            <!-- ──────────────────── Row 1: action bar ──────────────────── -->
+            <Border Grid.Row="1" Classes="toolbar" Margin="0,0,0,6">
+                <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto">
+                    <TextBox Grid.Column="0" Width="280"
+                             Text="{Binding FilePath}"
+                             Watermark="File path">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Enter" Command="{Binding LoadFromFileCommand}"/>
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button Grid.Column="1" Margin="4,0,0,0" MinWidth="64" Content="Load"
+                            Command="{Binding LoadFromFileCommand}"/>
+
+                    <!-- DACPAC checkbox inline — still hidden when DACPAC isn't
+                         configured in Settings. -->
+                    <CheckBox Grid.Column="2" Margin="14,0,0,0"
+                              VerticalAlignment="Center"
+                              Content="DACPAC"
+                              IsChecked="{Binding StageAsDacpacBranch}"
+                              IsEnabled="{Binding !IsBusy}"
+                              IsVisible="{Binding DacpacConfigured}"
+                              ToolTip.Tip="Write each successful sync's source definition to the configured DACPAC / SSDT folder. Configured in Settings → DACPAC."/>
+
+                    <!-- spacer @ col 3 -->
+
+                    <Button Grid.Column="4" MinWidth="72" Content="Backup"
+                            Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
+                            ToolTip.Tip="Capture each row from source + ticked targets without altering anything."/>
+                    <Button Grid.Column="5" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
+                            Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
+                    <Button Grid.Column="6" Margin="4,0,0,0" MinWidth="64" Content="Clear"
+                            Command="{Binding ClearCommand}"
+                            ToolTip.Tip="Remove every row from the list."/>
+                    <Button Grid.Column="7" Margin="4,0,0,0" MinWidth="120" Content="Remove selected"
+                            Command="{Binding RemoveCheckedCommand}"
+                            ToolTip.Tip="Remove rows whose checkbox is ticked."/>
+                </Grid>
+            </Border>
+
+            <!-- ──────────────── Row 2: items area (the main view) ──────────────── -->
+            <Border Grid.Row="2" Classes="card" Padding="0" ClipToBounds="True">
+                <DockPanel>
+
+                    <!-- Filter strip pinned to the top of the items card.
+                         Just the status filter and live OK/Fail counters
+                         now — name filtering moved to the global Ctrl+F
+                         overlay (browser-style). One less input on the
+                         page; the filter still works, it's just summoned
+                         by keystroke instead of always-visible. -->
+                    <Border DockPanel.Dock="Top"
+                            Background="{DynamicResource App.ToolbarBgBrush}"
+                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                            BorderThickness="0,0,0,1"
+                            Padding="10,6">
+                        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
+                            <TextBlock Grid.Column="0" Text="Status" VerticalAlignment="Center"
+                                       FontSize="11" Opacity="0.7" Margin="0,0,8,0"/>
+                            <ComboBox  Grid.Column="1" Width="120" MinHeight="26"
+                                       ItemsSource="{Binding StatusFilterOptions}"
+                                       SelectedItem="{Binding StatusFilter}"/>
+                            <!-- spacer @ col 2 -->
+                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="0,0,12,0"
+                                       FontSize="11" Opacity="0.55"
+                                       Text="{Binding NameFilter, StringFormat='Filtered: {0}'}"
+                                       IsVisible="{Binding NameFilter, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Margin="0,0,12,0"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource SystemFillColorSuccessBrush}"
+                                       Text="{Binding SuccessCount, StringFormat='OK: {0}'}"/>
+                            <TextBlock Grid.Column="5" VerticalAlignment="Center"
+                                       FontSize="11"
+                                       Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                       Text="{Binding FailCount, StringFormat='Fail: {0}'}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Custom column header — replaces DataGrid's built-in
+                         headers so we can render the QuickAdd row UNDER it.
+                         Column widths: 44 (checkbox), 50 (#), * (name),
+                         100 (status), 40 (preview eye), 2* (message). -->
+                    <Border DockPanel.Dock="Top"
+                            Background="{DynamicResource App.ElevatedBgBrush}"
+                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                            BorderThickness="0,0,0,1">
+                        <Grid ColumnDefinitions="44,50,*,100,40,2*" Margin="0,7">
+                            <!-- col 0: blank (row checkbox col); col 4: blank (preview col) -->
+                            <TextBlock Grid.Column="1" Text="#" FontSize="11" FontWeight="SemiBold"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                            <TextBlock Grid.Column="2" Text="Object name" FontSize="11" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Margin="6,0,0,0"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                            <TextBlock Grid.Column="3" Text="Status" FontSize="11" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Margin="6,0,0,0"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                            <TextBlock Grid.Column="5" Text="Message" FontSize="11" FontWeight="SemiBold"
+                                       VerticalAlignment="Center" Margin="6,0,0,0"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- QuickAdd row — sits UNDER the column header, flush with the
+                         data rows below. Type a name + Enter to add; paste a
+                         multi-line list to fan out. -->
+                    <Border DockPanel.Dock="Top"
+                            Background="{DynamicResource App.WindowBgBrush}"
+                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                            BorderThickness="0,0,0,1">
+                        <Grid ColumnDefinitions="44,50,*,100,40,2*" Margin="0,4">
+                            <TextBlock Grid.Column="1" Text="＋"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                       FontSize="13" FontWeight="Bold"
+                                       Foreground="{DynamicResource App.SuccessBrush}"
+                                       ToolTip.Tip="Type a name + Enter to add. Paste a multi-line list to add many at once."/>
+                            <TextBox Grid.Column="2" Grid.ColumnSpan="4"
+                                     x:Name="QuickAddBox"
+                                     BorderThickness="0" Background="Transparent"
+                                     Padding="6,2" MinHeight="26"
+                                     VerticalContentAlignment="Center"
+                                     Watermark="Object name(s)"
+                                     KeyDown="OnQuickAddKeyDown"
+                                     PastingFromClipboard="OnQuickAddPaste"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Items DataGrid: HeadersVisibility=None — we render the
+                         header above. Eye column opens BatchPreviewWindow with
+                         source + every ticked target's CREATE definition. -->
+                    <DataGrid x:Name="ItemsGrid" ItemsSource="{Binding FilteredItems}"
+                              AutoGenerateColumns="False"
+                              HeadersVisibility="None"
+                              GridLinesVisibility="Horizontal"
+                              CanUserReorderColumns="False"
+                              SelectionMode="Extended"
+                              ClipboardCopyMode="ExcludeHeader"
+                              KeyDown="OnGridKeyDown">
+                        <DataGrid.Columns>
+                            <DataGridTemplateColumn Header="" Width="44" CanUserResize="False" CanUserSort="False">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate DataType="vm:BatchItem">
+                                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  Margin="0" Padding="0" MinWidth="0"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="#"           Binding="{Binding Index}"   Width="50"  IsReadOnly="True"/>
+                            <DataGridTextColumn Header="Object name" Binding="{Binding Name}"    Width="*"/>
+                            <DataGridTextColumn Header="Status"      Binding="{Binding Status}"  Width="100" IsReadOnly="True"/>
+                            <DataGridTemplateColumn Header="" Width="40" CanUserResize="False" CanUserSort="False">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate DataType="vm:BatchItem">
+                                        <Button Classes="rowIconBtn" Click="OnPreviewClick" Tag="{Binding}"
+                                                ToolTip.Tip="Preview this row's source + every ticked target — fetches the live CREATE definition from each, no execution.">
+                                            <TextBlock Text="👁" FontSize="12"/>
+                                        </Button>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+                            <DataGridTextColumn Header="Message"     Binding="{Binding Message}" Width="2*"  IsReadOnly="True"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </DockPanel>
+            </Border>
+
+            <!-- ──────────────────── Row 3: status text ──────────────────── -->
+            <Border Grid.Row="3" Classes="pageStatus">
+                <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+            </Border>
+        </Grid>
     </DockPanel>
 </UserControl>

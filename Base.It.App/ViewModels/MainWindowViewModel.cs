@@ -14,6 +14,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public CompareViewModel   Compare   { get; }
     public SyncViewModel      Sync      { get; }
     public BatchViewModel     Batch     { get; }
+    public ScriptsViewModel   Scripts   { get; }
     public QueryViewModel     Query     { get; }
     public WatchViewModel     Watch     { get; }
     public SettingsViewModel  Settings  { get; }
@@ -23,7 +24,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <summary>Bound by the top-bar active-group picker. Also exposed in Settings.</summary>
     public ObservableCollection<ConnectionGroup> ConnectionGroups { get; } = new();
 
+    /// <summary>
+    /// Flat picker source for the title-bar connection-group AutoCompleteBox.
+    /// Always begins with the synthetic "All connections" entry (Group=null)
+    /// so the user has a single click to drop the filter, plus one
+    /// <see cref="ConnectionGroupOption"/> per real group. Rebuilt by
+    /// <see cref="LoadGroupsAsync"/>.
+    /// </summary>
+    public ObservableCollection<ConnectionGroupOption> ConnectionGroupOptions { get; } = new();
+
     [ObservableProperty] private ConnectionGroup? _activeConnectionGroup;
+    [ObservableProperty] private ConnectionGroupOption? _selectedConnectionGroupOption;
 
     /// <summary>Raised when the dock wants Compare foreground + a new tab.</summary>
     public event Action? NavigateToCompareRequested;
@@ -40,6 +51,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Compare  = new CompareViewModel(Services);
         Sync     = new SyncViewModel(Services);
         Batch    = new BatchViewModel(Services);
+        Scripts  = new ScriptsViewModel(Services);
         Query    = new QueryViewModel(Services);
         Watch    = new WatchViewModel(Services);
         Settings = new SettingsViewModel(Services);
@@ -66,6 +78,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             FetchDock.ReloadDatabases();
             Sync.Reload();
             Batch.Reload();
+            Scripts.Reload();
             _ = Batch.RefreshDacpacAvailabilityAsync();
             _ = Sync.RefreshDacpacAvailabilityAsync();
             _ = Watch.RefreshDacpacAvailabilityAsync();
@@ -86,6 +99,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             FetchDock.ReloadDatabases();
             Sync.Reload();
             Batch.Reload();
+            Scripts.Reload();
             Query.Reload();
         };
 
@@ -115,6 +129,26 @@ public sealed partial class MainWindowViewModel : ObservableObject
         ConnectionGroups.Clear();
         foreach (var g in Services.ConnectionGroups.All) ConnectionGroups.Add(g);
         ActiveConnectionGroup = Services.ConnectionGroups.ActiveGroup;
+
+        RebuildConnectionGroupOptions();
+    }
+
+    /// <summary>
+    /// Reflects the current <see cref="ConnectionGroups"/> + active id
+    /// into <see cref="ConnectionGroupOptions"/> with "All connections"
+    /// pinned at index 0. Selection is preserved by id.
+    /// </summary>
+    private void RebuildConnectionGroupOptions()
+    {
+        ConnectionGroupOptions.Clear();
+        ConnectionGroupOptions.Add(ConnectionGroupOption.All);
+        foreach (var g in ConnectionGroups)
+            ConnectionGroupOptions.Add(new ConnectionGroupOption(g.Name, g));
+
+        var match = ConnectionGroupOptions.FirstOrDefault(o => o.Group?.Id == ActiveConnectionGroup?.Id)
+                    ?? ConnectionGroupOptions[0];
+        if (!ReferenceEquals(SelectedConnectionGroupOption, match))
+            SelectedConnectionGroupOption = match;
     }
 
     /// <summary>
@@ -125,6 +159,23 @@ public sealed partial class MainWindowViewModel : ObservableObject
     async partial void OnActiveConnectionGroupChanged(ConnectionGroup? value)
     {
         await Services.SetActiveConnectionGroupAsync(value?.Id);
+        // Mirror to the AutoCompleteBox-bound option so the picker
+        // text stays in sync when something else changes the active
+        // group (e.g. Settings save, Home shortcut).
+        var match = ConnectionGroupOptions.FirstOrDefault(o => o.Group?.Id == value?.Id);
+        if (match is not null && !ReferenceEquals(SelectedConnectionGroupOption, match))
+            SelectedConnectionGroupOption = match;
+    }
+
+    /// <summary>
+    /// Two-way pull from the AutoCompleteBox. Picking "All connections"
+    /// (Group=null) clears the filter; picking a real group sets it.
+    /// </summary>
+    partial void OnSelectedConnectionGroupOptionChanged(ConnectionGroupOption? value)
+    {
+        if (value is null) return;
+        if (ReferenceEquals(value.Group, ActiveConnectionGroup)) return;
+        ActiveConnectionGroup = value.Group;
     }
 
     /// <summary>Clear the active-group filter — all connections become visible again.</summary>

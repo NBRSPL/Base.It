@@ -16,20 +16,44 @@ public class FileBackupStoreTests : IDisposable
     }
 
     [Fact]
-    public void WriteObject_uses_DATE_Env_ObjectType_layout()
+    public void WriteObject_uses_DATE_RunRoleEnv_ObjectType_layout()
     {
         var store = new FileBackupStore(_root);
         var id    = new ObjectIdentifier("dbo", "usp_Foo");
 
-        var path = store.WriteObject("DEV", SqlObjectType.StoredProcedure, id, "CREATE PROC x AS SELECT 1");
+        var path = store.WriteObject(
+            runStamp: "143022456",
+            role:     BackupRole.Source,
+            environment: "DEV",
+            type:     SqlObjectType.StoredProcedure,
+            id:       id,
+            definition: "CREATE PROC x AS SELECT 1");
 
         var rel = Path.GetRelativePath(_root, path).Replace('\\', '/');
         var parts = rel.Split('/');
-        Assert.Equal(4, parts.Length);                                 // DATE / ENV / TYPE / file
-        Assert.Matches(@"^\d{4}-\d{2}-\d{2}$",       parts[0]);         // yyyy-MM-dd
-        Assert.Equal("DEV",                          parts[1]);         // env folder
-        Assert.Equal("StoredProcedure",              parts[2]);         // object type folder
-        Assert.Matches(@"^usp_Foo_\d{9}\.sql$",      parts[3]);         // name first, time at end
+        Assert.Equal(4, parts.Length);                                  // DATE / RUN_ROLE_ENV / TYPE / file
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2}$",   parts[0]);              // yyyy-MM-dd
+        Assert.Equal("143022456_source_DEV",     parts[1]);              // run / role / env folder
+        Assert.Equal("StoredProcedure",          parts[2]);              // type folder
+        Assert.Equal("usp_Foo.sql",              parts[3]);              // bare name, no timestamp suffix
+    }
+
+    [Fact]
+    public void WriteObject_role_target_lands_in_target_subfolder()
+    {
+        var store = new FileBackupStore(_root);
+        var id    = new ObjectIdentifier("dbo", "usp_Foo");
+
+        var path = store.WriteObject(
+            runStamp: "143022456",
+            role:     BackupRole.Target,
+            environment: "PROD",
+            type:     SqlObjectType.StoredProcedure,
+            id:       id,
+            definition: "CREATE PROC x AS SELECT 1");
+
+        var rel = Path.GetRelativePath(_root, path).Replace('\\', '/');
+        Assert.Contains("/143022456_target_PROD/", "/" + rel + "/");
     }
 
     [Fact]
@@ -38,61 +62,56 @@ public class FileBackupStoreTests : IDisposable
         var store = new FileBackupStore(_root);
         var id    = new ObjectIdentifier("sales", "Orders");
 
-        var path = store.WriteObject("DEV", SqlObjectType.Table, id, "col1");
+        var path = store.WriteObject(
+            runStamp: "143022456",
+            role:     BackupRole.Source,
+            environment: "DEV",
+            type:     SqlObjectType.Table,
+            id:       id,
+            definition: "col1");
 
-        var file = Path.GetFileName(path);
-        Assert.Matches(@"^sales\.Orders_\d{9}\.sql$", file);            // non-default schema is preserved
+        Assert.Equal("sales.Orders.sql", Path.GetFileName(path));
     }
 
     [Fact]
-    public void Two_writes_never_overwrite_each_other()
+    public void Same_run_same_object_collision_is_resolved_with_counter_suffix()
     {
         var store = new FileBackupStore(_root);
         var id    = new ObjectIdentifier("dbo", "usp_Foo");
 
-        var p1 = store.WriteObject("DEV", SqlObjectType.StoredProcedure, id, "v1");
-        var p2 = store.WriteObject("DEV", SqlObjectType.StoredProcedure, id, "v2");
+        var p1 = store.WriteObject("143022456", BackupRole.Source, "DEV", SqlObjectType.StoredProcedure, id, "v1");
+        var p2 = store.WriteObject("143022456", BackupRole.Source, "DEV", SqlObjectType.StoredProcedure, id, "v2");
 
         Assert.True(File.Exists(p1));
         Assert.True(File.Exists(p2));
         Assert.NotEqual(p1, p2);
+        Assert.Equal("usp_Foo.sql",   Path.GetFileName(p1));
+        Assert.Equal("usp_Foo_1.sql", Path.GetFileName(p2));
         Assert.Equal("v1", File.ReadAllText(p1));
         Assert.Equal("v2", File.ReadAllText(p2));
     }
 
     [Fact]
-    public void Same_millisecond_collision_is_resolved_with_counter_suffix()
+    public void Different_runs_get_different_folders_no_collision()
     {
-        // Pre-create a file matching the exact name the store is about to pick
-        // by writing once, deducing the directory, then filling every possible
-        // HHmmssfff_ENV.sql slot is impractical; instead, write twice and
-        // assert both files exist (covered above), and additionally cover the
-        // _N suffix path by pre-seeding the destination directory.
         var store = new FileBackupStore(_root);
-        var id    = new ObjectIdentifier("sales", "Orders");
-        var first = store.WriteObject("TEST", SqlObjectType.Table, id, "col1");
+        var id    = new ObjectIdentifier("dbo", "usp_Foo");
 
-        var dir = Path.GetDirectoryName(first)!;
-        var twin = Path.Combine(dir, Path.GetFileName(first));  // same name
-        // File already exists; the next write in the same ms would collide.
-        // Force a collision by using the same timestamp-derived name again:
-        var seeded = twin.Replace(".sql", "_1.sql");
-        File.WriteAllText(seeded, "seeded");
+        var p1 = store.WriteObject("143022456", BackupRole.Source, "DEV", SqlObjectType.StoredProcedure, id, "v1");
+        var p2 = store.WriteObject("143510999", BackupRole.Source, "DEV", SqlObjectType.StoredProcedure, id, "v2");
 
-        var p = store.WriteObject("TEST", SqlObjectType.Table, id, "col2");
-        Assert.True(File.Exists(p));
-        Assert.NotEqual(first,  p);
-        Assert.NotEqual(seeded, p);
-        Assert.Equal("col2",   File.ReadAllText(p));
-        Assert.Equal("seeded", File.ReadAllText(seeded));       // untouched
+        Assert.NotEqual(Path.GetDirectoryName(p1), Path.GetDirectoryName(p2));
+        // Both files are clean "usp_Foo.sql" — no counter suffix because each is in its own run folder.
+        Assert.Equal("usp_Foo.sql", Path.GetFileName(p1));
+        Assert.Equal("usp_Foo.sql", Path.GetFileName(p2));
     }
 
     [Fact]
     public void Filename_sanitizes_path_unsafe_characters()
     {
         var store = new FileBackupStore(_root);
-        var id    = new ObjectIdentifier("dbo", "Foo/Bar");     // slash is illegal
-        var p     = store.WriteObject("DEV", SqlObjectType.StoredProcedure, id, "x");
+        var id    = new ObjectIdentifier("dbo", "Foo/Bar");      // slash is illegal
+        var p     = store.WriteObject("143022456", BackupRole.Manual, "DEV", SqlObjectType.StoredProcedure, id, "x");
         var folder = Path.GetFileName(Path.GetDirectoryName(p)!);
         Assert.DoesNotContain("/", folder);
         Assert.DoesNotContain("\\", folder);
@@ -103,8 +122,8 @@ public class FileBackupStoreTests : IDisposable
     {
         var store = new FileBackupStore(_root);
         var id    = new ObjectIdentifier("dbo", "usp_Foo");
-        var p1    = store.WriteObject("DEV",  SqlObjectType.StoredProcedure, id, "src");
-        var p2    = store.WriteObject("TEST", SqlObjectType.StoredProcedure, id, "tgt");
+        var p1    = store.WriteObject("143022456", BackupRole.Source, "DEV",  SqlObjectType.StoredProcedure, id, "src");
+        var p2    = store.WriteObject("143022456", BackupRole.Target, "TEST", SqlObjectType.StoredProcedure, id, "tgt");
 
         var z1 = store.ZipFiles("Pair.zip", p1, p2);
         var z2 = store.ZipFiles("Pair.zip", p1, p2);
@@ -112,5 +131,23 @@ public class FileBackupStoreTests : IDisposable
         Assert.True(File.Exists(z1));
         Assert.True(File.Exists(z2));
         Assert.NotEqual(z1, z2);
+    }
+
+    [Fact]
+    public void Manual_role_uses_manual_slug_in_folder()
+    {
+        var store = new FileBackupStore(_root);
+        var id    = new ObjectIdentifier("dbo", "usp_Foo");
+
+        var path = store.WriteObject(
+            runStamp: "143022456",
+            role:     BackupRole.Manual,
+            environment: "PROD",
+            type:     SqlObjectType.StoredProcedure,
+            id:       id,
+            definition: "CREATE PROC x AS SELECT 1");
+
+        var rel = Path.GetRelativePath(_root, path).Replace('\\', '/');
+        Assert.Contains("/143022456_manual_PROD/", "/" + rel + "/");
     }
 }

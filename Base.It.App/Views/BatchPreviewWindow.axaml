@@ -1,0 +1,43 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:Base.It.App.ViewModels"
+        x:Class="Base.It.App.Views.BatchPreviewWindow"
+        x:DataType="vm:BatchPreviewViewModel"
+        Title="{Binding Title}"
+        Width="1100" Height="680"
+        MinWidth="640" MinHeight="380"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource App.WindowBgBrush}">
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto" Margin="14">
+
+        <!-- Header -->
+        <TextBlock Grid.Row="0" Text="{Binding Title}"
+                   FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+
+        <!-- Status (per-load summary: count + diffs / errors) -->
+        <TextBlock Grid.Row="1" Text="{Binding Status}"
+                   Classes="subtle" Margin="0,0,0,4"/>
+
+        <!-- Endpoint failures shown inline so unreachable / missing
+             targets aren't silently dropped. -->
+        <Border Grid.Row="2" Padding="8" Margin="0,4,0,8"
+                CornerRadius="4"
+                Background="{DynamicResource App.FieldErrorBgBrush}"
+                BorderBrush="{DynamicResource App.FieldErrorBorderBrush}"
+                BorderThickness="1"
+                IsVisible="{Binding LoadError, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+            <SelectableTextBlock Text="{Binding LoadError}"
+                                 Classes="errorText"
+                                 TextWrapping="Wrap"/>
+        </Border>
+
+        <Border Grid.Row="3" Classes="card" Padding="2">
+            <Grid x:Name="PanesHost"/>
+        </Border>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0">
+            <Button Content="Close" MinWidth="80" Click="OnClose"/>
+        </StackPanel>
+    </Grid>
+</Window>

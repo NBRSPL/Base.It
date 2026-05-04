@@ -20,7 +20,7 @@
                 <TextBlock Grid.Column="1" Text="Fetch" Opacity="0.6" FontSize="11"
                            VerticalAlignment="Center" Margin="8,0,8,0"/>
                 <TextBox  Grid.Column="2" Text="{Binding ObjectName}"
-                          Watermark="schema.object (e.g. dbo.usp_Something)"
+                          Watermark="Object name"
                           MinHeight="28">
                     <TextBox.KeyBindings>
                         <KeyBinding Gesture="Enter" Command="{Binding FetchCommand}"/>

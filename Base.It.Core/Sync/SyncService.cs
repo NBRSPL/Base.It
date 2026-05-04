@@ -29,13 +29,30 @@ public sealed class SyncService
         _logger = logger;
     }
 
+    /// <param name="captureSourceBackup">
+    /// When true (default), this call writes a source-side backup file to
+    /// <see cref="FileBackupStore"/>. Pass false from a multi-target loop
+    /// after the caller has captured the source backup once — otherwise
+    /// you get N copies of the same source content (one per target call)
+    /// in the source-env folder.
+    /// </param>
+    /// <param name="runStamp">
+    /// Run identifier used to group all backups produced by this
+    /// operation under a single <c>{runStamp}_{role}_{env}</c> folder.
+    /// Pass the same stamp to every <see cref="SyncAsync"/> call within
+    /// one user click so the artifacts share a folder. Null = generate
+    /// a fresh stamp here (single-call use).
+    /// </param>
     public async Task<SyncResult> SyncAsync(
         string sourceConn, string targetConn,
         ObjectIdentifier id,
         string sourceEnv, string targetEnv,
         CancellationToken ct = default,
-        bool zipPair = true)
+        bool zipPair = true,
+        bool captureSourceBackup = true,
+        string? runStamp = null)
     {
+        runStamp ??= FileBackupStore.NewRunStamp();
         try
         {
             var source = await _scripter.GetObjectAsync(sourceConn, id, ct);
@@ -50,7 +67,7 @@ public sealed class SyncService
             {
                 var existing = await _scripter.GetObjectAsync(targetConn, id, ct);
                 if (existing is not null)
-                    targetBackup = _backups.WriteObject(targetEnv, existing.Type, id, existing.Definition);
+                    targetBackup = _backups.WriteObject(runStamp, BackupRole.Target, targetEnv, existing.Type, id, existing.Definition);
             }
 
             var script = targetExists
@@ -73,7 +90,12 @@ public sealed class SyncService
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
-            var sourceBackup = _backups.WriteObject(sourceEnv, source.Type, id, source.Definition);
+            // Skip the source-side write when the caller has already
+            // captured it once for this run. Avoids N identical copies
+            // when one source is being pushed to N targets.
+            string? sourceBackup = captureSourceBackup
+                ? _backups.WriteObject(runStamp, BackupRole.Source, sourceEnv, source.Type, id, source.Definition)
+                : null;
 
             // Name the zip after the object actually being synced — makes
             // a folder full of zips self-describing without opening them.
@@ -84,10 +106,15 @@ public sealed class SyncService
             {
                 var stamp   = DateTime.Now.ToString("yyyyMMddHHmmssfff");
                 var zipName = $"{id.Name}_{sourceEnv}_to_{targetEnv}_{stamp}.zip";
-                var zipPaths = targetBackup is null
-                    ? new[] { sourceBackup }
-                    : new[] { sourceBackup, targetBackup };
-                zipPath = _backups.ZipFiles(zipName, zipPaths);
+                // Filter out nulls — when captureSourceBackup is false the
+                // source path is null; when target didn't pre-exist there's
+                // no target backup either.
+                var zipPaths = new[] { sourceBackup, targetBackup }
+                    .Where(p => !string.IsNullOrEmpty(p))
+                    .Cast<string>()
+                    .ToArray();
+                if (zipPaths.Length > 0)
+                    zipPath = _backups.ZipFiles(zipName, zipPaths);
             }
 
             _logger.Log(zipPath is not null

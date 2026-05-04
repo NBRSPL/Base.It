@@ -115,8 +115,31 @@ public sealed partial class SyncViewModel : ObservableObject
         Endpoints.Clear();
         foreach (var ep in EnvironmentListProvider.Endpoints(_svc)) Endpoints.Add(ep);
 
-        SourceEnv      ??= Environments.FirstOrDefault();
-        SourceDatabase ??= Databases.FirstOrDefault();
+        // Reconcile the previously-picked source against the new visible
+        // endpoint set. When the active connection group changes, the old
+        // source may no longer be visible — without this the picker text
+        // clears but SourceEnv/SourceDatabase persist, leaving the colour
+        // badge stuck on the previous selection.
+        var match = Endpoints.FirstOrDefault(e =>
+            string.Equals(e.Environment, SourceEnv,      StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(e.Database,    SourceDatabase, StringComparison.OrdinalIgnoreCase));
+        _suspendRebuild = true;
+        try
+        {
+            if (match is null)
+            {
+                var firstEp = Endpoints.FirstOrDefault();
+                SourceEnv      = firstEp?.Environment;
+                SourceDatabase = firstEp?.Database;
+            }
+            else
+            {
+                SourceEnv      = match.Environment;
+                SourceDatabase = match.Database;
+            }
+        }
+        finally { _suspendRebuild = false; }
+
         RefreshProfiles();
         RebuildTargets();
         SyncSelectedEndpoint();
@@ -428,6 +451,25 @@ public sealed partial class SyncViewModel : ObservableObject
             var parts = new List<string>();
             int ok = 0, fail = 0, notFound = 0;
 
+            // One run-stamp groups every backup file (source + each
+            // target) under the same dated folder. SyncAsync writes a
+            // source-side backup on every call by default; we capture
+            // it exactly once here and pass captureSourceBackup=false
+            // through the loop so the source folder doesn't accumulate
+            // N identical copies.
+            var runStamp = Base.It.Core.Backup.FileBackupStore.NewRunStamp();
+            string? sourceBackupPath = null;
+            try
+            {
+                var srcOutcome = await _svc.Backup.BackupAsync(
+                    srcConn!, SourceEnv!, id,
+                    role: Base.It.Core.Backup.BackupRole.Source,
+                    runStamp: runStamp);
+                if (srcOutcome.Kind == Base.It.Core.Backup.BackupOutcomeKind.Written)
+                    sourceBackupPath = srcOutcome.FilePath;
+            }
+            catch { /* best-effort — sync continues even if the pre-capture failed */ }
+
             foreach (var t in checkedTargets)
             {
                 var tgtConn = _svc.Connections.Get(t.Environment, t.Database);
@@ -438,7 +480,11 @@ public sealed partial class SyncViewModel : ObservableObject
                 }
                 try
                 {
-                    var r = await _svc.Sync.SyncAsync(srcConn!, tgtConn!, id, SourceEnv!, t.Environment);
+                    var r = await _svc.Sync.SyncAsync(
+                        srcConn!, tgtConn!, id, SourceEnv!, t.Environment,
+                        ct: default, zipPair: true,
+                        captureSourceBackup: false,
+                        runStamp: runStamp);
                     switch (r.Status)
                     {
                         case SyncStatus.Success:
@@ -516,13 +562,19 @@ public sealed partial class SyncViewModel : ObservableObject
         {
             var id     = ObjectIdentifier.Parse(ObjectName.Trim());
             var parts  = new List<string>();
+            // One stamp groups source + every target in this Backup
+            // click into the same dated folder structure.
+            var runStamp = Base.It.Core.Backup.FileBackupStore.NewRunStamp();
 
             if (!string.IsNullOrWhiteSpace(SourceEnv))
             {
                 var conn = _svc.Connections.Get(SourceEnv!, SourceDatabase!);
                 if (!string.IsNullOrWhiteSpace(conn))
                 {
-                    var r = await _svc.Backup.BackupAsync(conn!, SourceEnv!, id);
+                    var r = await _svc.Backup.BackupAsync(
+                        conn!, SourceEnv!, id,
+                        role: Base.It.Core.Backup.BackupRole.Source,
+                        runStamp: runStamp);
                     parts.Add(FormatPart(SourceEnv!, r));
                 }
             }
@@ -531,7 +583,10 @@ public sealed partial class SyncViewModel : ObservableObject
             {
                 var conn = _svc.Connections.Get(t.Environment, t.Database);
                 if (string.IsNullOrWhiteSpace(conn)) continue;
-                var r = await _svc.Backup.BackupAsync(conn!, t.Environment, id);
+                var r = await _svc.Backup.BackupAsync(
+                    conn!, t.Environment, id,
+                    role: Base.It.Core.Backup.BackupRole.Target,
+                    runStamp: runStamp);
                 parts.Add(FormatPart($"{t.Environment}·{t.Database}", r));
             }
 
@@ -553,4 +608,61 @@ public sealed partial class SyncViewModel : ObservableObject
         Base.It.Core.Backup.BackupOutcomeKind.NotFound => $"[{label}] not found",
         _                                              => $"[{label}] {r.Message}"
     };
+
+    /// <summary>
+    /// Build a preview of <see cref="ObjectName"/> across the source + every
+    /// ticked target — same shape Batch uses, so the preview window can be
+    /// shared. Returns null when the source isn't picked, the object name is
+    /// blank, or no target is ticked. Connection strings are resolved here so
+    /// the preview window keeps working even after the source / target pick
+    /// changes underneath it.
+    /// </summary>
+    public BatchPreviewViewModel? BuildPreview()
+    {
+        if (string.IsNullOrWhiteSpace(SourceEnv) || string.IsNullOrWhiteSpace(SourceDatabase)) return null;
+        if (string.IsNullOrWhiteSpace(ObjectName)) return null;
+
+        var endpoints = new List<PreviewEndpoint>();
+
+        var srcConn = _svc.Connections.Get(SourceEnv!, SourceDatabase!) ?? "";
+        endpoints.Add(new PreviewEndpoint(
+            Label:            $"Source · {SourceEnv} / {SourceDatabase}",
+            Color:            SourceProfile?.Color,
+            ConnectionString: srcConn));
+
+        foreach (var t in Targets.Where(t => t.IsChecked))
+        {
+            var tgtConn = _svc.Connections.Get(t.Environment, t.Database) ?? "";
+            var profile = _svc.Connections.GetProfile(t.Environment, t.Database);
+            endpoints.Add(new PreviewEndpoint(
+                Label:            $"Target · {t.Environment} / {t.Database}",
+                Color:            profile?.Color,
+                ConnectionString: tgtConn));
+        }
+
+        if (endpoints.Count < 2) return null; // source-only preview is pointless
+
+        return new BatchPreviewViewModel(_svc, ObjectName.Trim(), endpoints);
+    }
+
+    /// <summary>
+    /// Preview command — opens the same diff window Batch uses with the
+    /// current source + ticked targets for <see cref="ObjectName"/>. Pure
+    /// read; no execution. Wired from the view's code-behind, which owns
+    /// the Window instance.
+    /// </summary>
+    [RelayCommand]
+    private void Preview()
+    {
+        var preview = BuildPreview();
+        if (preview is null)
+        {
+            _svc.Toasts.Warning("Nothing to preview", "Pick source, type an object name, and tick at least one target.");
+            return;
+        }
+        PreviewRequested?.Invoke(preview);
+    }
+
+    /// <summary>Raised when <see cref="PreviewCommand"/> wants the host view to open a preview window.</summary>
+    public event Action<BatchPreviewViewModel>? PreviewRequested;
 }

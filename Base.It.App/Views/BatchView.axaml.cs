@@ -6,15 +6,12 @@ using Base.It.App.ViewModels;
 
 namespace Base.It.App.Views;
 
-public partial class BatchView : UserControl
+public partial class BatchView : UserControl, ISupportsFind
 {
     public BatchView()
     {
         InitializeComponent();
         WireSourceFilter();
-        // Ctrl+F (anywhere on the pane) focuses the name find-box.
-        // KeyBinding can't focus a control on its own — handler in code.
-        KeyDown += OnPaneKeyDown;
     }
 
     private void WireSourceFilter()
@@ -32,17 +29,15 @@ public partial class BatchView : UserControl
         };
     }
 
-    /// <summary>Pane-wide shortcuts. Ctrl+F focuses the items-grid name find-box.</summary>
-    private void OnPaneKeyDown(object? sender, KeyEventArgs e)
+    /// <summary>ISupportsFind: maps the global find overlay to the items-grid name filter.</summary>
+    public void ApplyFind(string? text)
     {
-        if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
-        {
-            var box = this.FindControl<TextBox>("NameFilterBox");
-            box?.Focus();
-            box?.SelectAll();
-            e.Handled = true;
-        }
+        if (DataContext is not BatchViewModel vm) return;
+        vm.NameFilter = text ?? string.Empty;
     }
+
+    public string CurrentFindText
+        => (DataContext as BatchViewModel)?.NameFilter ?? string.Empty;
 
     /// <summary>
     /// QuickAdd box (the editable first row above the items grid). Enter
@@ -83,6 +78,27 @@ public partial class BatchView : UserControl
     }
 
     /// <summary>
+    /// Eye icon → open the preview window for this row. Fetches source +
+    /// every ticked target's CREATE definition lazily, one tab per
+    /// endpoint. Pure read; nothing is executed against any target.
+    /// </summary>
+    private void OnPreviewClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.Tag is not BatchItem item) return;
+        if (DataContext is not BatchViewModel vm) return;
+        e.Handled = true;
+
+        var preview = vm.BuildPreview(item);
+        if (preview is null) return;
+
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        var win = new BatchPreviewWindow { DataContext = preview };
+        if (owner is not null) win.ShowDialog(owner);
+        else                   win.Show();
+    }
+
+    /// <summary>
     /// Excel-like keys on the items grid:
     ///   Ctrl+V  → paste newline-separated names from the clipboard.
     ///   Delete  → remove every selected row.
@@ -95,8 +111,6 @@ public partial class BatchView : UserControl
         if (DataContext is not BatchViewModel vm) return;
         if (sender is not DataGrid grid) return;
 
-        // Ctrl+V — paste a list. Read the clipboard via the active TopLevel
-        // (Avalonia 11 doesn't expose a static Clipboard helper).
         if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
             var top = TopLevel.GetTopLevel(this);
@@ -112,9 +126,6 @@ public partial class BatchView : UserControl
             return;
         }
 
-        // Delete — remove every selected row. Snapshot the selection
-        // before mutating Items so the SelectedItems collection doesn't
-        // shift under us mid-iteration.
         if (e.Key == Key.Delete)
         {
             var selected = grid.SelectedItems.OfType<BatchItem>().ToList();

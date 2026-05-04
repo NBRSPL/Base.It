@@ -28,6 +28,7 @@ public sealed class AppServices
     public SyncService Sync { get; }
     public BackupService Backup { get; }
     public QueryService Query { get; }
+    public SqlScriptRunner Scripts { get; }
 
     // UI-only services: theme + toast notifications.
     public AppSettingsStore AppSettings { get; }
@@ -104,6 +105,7 @@ public sealed class AppServices
         Sync     = new SyncService(Scripter, Backups, Logger);
         Backup   = new BackupService(Scripter, Backups, Logger);
         Query    = new QueryService();
+        Scripts  = new SqlScriptRunner();
 
         // Parallelism = 2 for the watcher's catalog fetches — continuous
         // polling load stays light regardless of group size.
@@ -236,12 +238,15 @@ public sealed class AppServices
     /// <summary>
     /// Centralised DACPAC export step shared by Sync, Batch and Watch.
     /// Fetches the object's DACPAC-shaped definition and routes it to the
-    /// right SSDT file. The trigger-inline policy lives here: when a
-    /// trigger has no existing standalone file in the SSDT tree, its
-    /// definition is folded into the parent table's file (re-emitting the
-    /// table's full DACPAC script, which already inlines every bound
-    /// trigger). Existing standalone trigger files keep being updated in
-    /// place so a team's chosen layout isn't disturbed.
+    /// right SSDT file.
+    ///
+    /// Triggers are <b>always</b> folded into the parent table's file —
+    /// the table DACPAC script already inlines every bound trigger, so a
+    /// standalone trigger file would just duplicate state. Standalone
+    /// trigger files are never written; if one already exists in the SSDT
+    /// tree, it's left untouched (manual cleanup) but no further updates
+    /// flow into it. Falls back to writing the trigger as its own file
+    /// only when the parent lookup genuinely fails (orphaned trigger).
     /// </summary>
     public async Task<DacpacExportResult> ExportToDacpacAsync(
         DacpacExporter exporter,
@@ -252,8 +257,7 @@ public sealed class AppServices
         var src = await Scripter.GetObjectForDacpacAsync(connectionString, id, ct);
         if (src is null) return new DacpacExportResult(null, false);
 
-        if (src.Type == Base.It.Core.Models.SqlObjectType.Trigger
-            && !exporter.HasExistingFile(id))
+        if (src.Type == Base.It.Core.Models.SqlObjectType.Trigger)
         {
             var parent = await Scripter.GetTriggerParentAsync(connectionString, id, ct);
             if (parent is not null)
@@ -263,6 +267,8 @@ public sealed class AppServices
                 {
                     var existed = exporter.HasExistingFile(parent.Value);
                     var path    = exporter.Export(parentObj.Id, parentObj.Type, parentObj.Definition);
+                    if (path is not null && !existed)
+                        SqlProjUpdater.EnsureBuildIncludes(exporter.Options.RootFolder, path);
                     return new DacpacExportResult(path, existed);
                 }
             }
@@ -272,6 +278,8 @@ public sealed class AppServices
 
         var existedSrc = exporter.HasExistingFile(src.Id);
         var pathSrc    = exporter.Export(src.Id, src.Type, src.Definition);
+        if (pathSrc is not null && !existedSrc)
+            SqlProjUpdater.EnsureBuildIncludes(exporter.Options.RootFolder, pathSrc);
         return new DacpacExportResult(pathSrc, existedSrc);
     }
 
