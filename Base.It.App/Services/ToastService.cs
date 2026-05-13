@@ -59,10 +59,13 @@ public sealed class ToastService
     private static readonly TimeSpan DefaultLife = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan ErrorLife   = TimeSpan.FromSeconds(7);
 
-    public void Info   (string title, string message = "") => Push(new ToastItem { Kind = ToastKind.Info,    Title = title, Message = message }, DefaultLife);
-    public void Success(string title, string message = "") => Push(new ToastItem { Kind = ToastKind.Success, Title = title, Message = message }, DefaultLife);
-    public void Warning(string title, string message = "") => Push(new ToastItem { Kind = ToastKind.Warning, Title = title, Message = message }, DefaultLife);
-    public void Error  (string title, string message = "") => Push(new ToastItem { Kind = ToastKind.Error,   Title = title, Message = message }, ErrorLife);
+    // Returns the pushed item so callers can hold a reference and
+    // dismiss it later (e.g. a "Checking for updates…" toast that the
+    // caller replaces once the network call completes).
+    public ToastItem Info   (string title, string message = "") { var t = new ToastItem { Kind = ToastKind.Info,    Title = title, Message = message }; Push(t, DefaultLife); return t; }
+    public ToastItem Success(string title, string message = "") { var t = new ToastItem { Kind = ToastKind.Success, Title = title, Message = message }; Push(t, DefaultLife); return t; }
+    public ToastItem Warning(string title, string message = "") { var t = new ToastItem { Kind = ToastKind.Warning, Title = title, Message = message }; Push(t, DefaultLife); return t; }
+    public ToastItem Error  (string title, string message = "") { var t = new ToastItem { Kind = ToastKind.Error,   Title = title, Message = message }; Push(t, ErrorLife);   return t; }
 
     /// <summary>
     /// Push a sticky toast with an action button. The toast does NOT auto-

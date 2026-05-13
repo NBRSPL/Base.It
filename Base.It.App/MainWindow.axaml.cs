@@ -70,50 +70,80 @@ public partial class MainWindow : AppWindow
             // they already have connections, Home is still the best landing
             // (quick dashboard) — users can then click through to any tab.
             SelectByTag("Home");
-            _ = RunDailyUpdateCheckAsync();
+            _ = RunStartupUpdateCheckAsync();
         };
     }
 
     /// <summary>
-    /// Once-a-day "is there a newer release?" probe. Throttled by
-    /// <see cref="AppSettingsStore.LastUpdateCheckUtc"/> so a user who
-    /// restarts the app five times in an hour only hits GitHub once.
-    /// When an update is available, fire a sticky toast with an "Update
-    /// now" button — clicking it downloads + applies the update and
-    /// restarts the app. Silent on every other outcome (no update, dev
-    /// build, network failure) so the user isn't pestered.
+    /// Run an update probe on every app launch. Surfaces an info toast
+    /// ("Checking for updates…") while the network call is in flight so
+    /// the user always sees the system working. After the check:
+    ///   - UpToDate → flip the same toast to "You're on the latest version"
+    ///                (auto-dismisses on the standard timer).
+    ///   - Available → dismiss the toast and open a small confirm dialog
+    ///                 asking "v{X} is available — install now?".
+    ///                 Yes downloads + applies + restarts; No closes the
+    ///                 dialog and leaves the app running (user can still
+    ///                 trigger it later from Settings → Updates).
+    ///   - Failed / dev build / offline → dismiss the toast silently so
+    ///                 a flaky connection doesn't pester the user.
     /// </summary>
-    private async Task RunDailyUpdateCheckAsync()
+    private async Task RunStartupUpdateCheckAsync()
     {
+        var updater = Vm.Services.Updater;
+        var toasts  = Vm.Services.Toasts;
+
+        // Don't show anything in dev / non-Velopack runs — there's no
+        // installed app to update.
+        if (!updater.IsInstalled) return;
+
+        // Update the timestamp regardless of result so other code that
+        // reads it (Settings → Updates "Last checked") stays accurate.
+        Vm.Services.AppSettings.LastUpdateCheckUtc = DateTime.UtcNow;
+
+        Services.ToastItem? checkingToast = null;
         try
         {
-            var updater = Vm.Services.Updater;
-            if (!updater.IsInstalled) return; // dev build or non-Velopack launch
-
-            var settings = Vm.Services.AppSettings;
-            var last     = settings.LastUpdateCheckUtc;
-            var now      = DateTime.UtcNow;
-            if (last is not null && now - last.Value < TimeSpan.FromHours(24)) return;
-
-            // Update the throttle timestamp BEFORE the call — even if the
-            // GitHub fetch fails or the user is offline, we don't want to
-            // re-try on every focus / restart for the next 24h.
-            settings.LastUpdateCheckUtc = now;
+            checkingToast = toasts.Info("Checking for updates…");
 
             await updater.CheckForUpdatesAsync().ConfigureAwait(true);
-            if (updater.State != Services.UpdateState.Available) return;
 
-            var latest = string.IsNullOrWhiteSpace(updater.LatestVersion) ? "newer version" : $"v{updater.LatestVersion}";
-            Vm.Services.Toasts.PushAction(
-                kind:        Services.ToastKind.Info,
-                title:       "Update available",
-                message:     $"Base.It {latest} is ready to install. Click Update now to download and restart.",
-                actionLabel: "Update now",
-                action:      () => _ = ApplyUpdateInteractivelyAsync());
+            switch (updater.State)
+            {
+                case Services.UpdateState.UpToDate:
+                    // Replace the in-flight toast with a brief success so the
+                    // user knows the check finished and they're current.
+                    if (checkingToast is not null) toasts.Dismiss(checkingToast);
+                    var current = string.IsNullOrWhiteSpace(updater.CurrentVersion)
+                        ? "the latest version"
+                        : $"v{updater.CurrentVersion}";
+                    toasts.Success("You're up to date", $"Running {current}.");
+                    break;
+
+                case Services.UpdateState.Available:
+                    // Drop the "checking" toast — the dialog takes over from here.
+                    if (checkingToast is not null) toasts.Dismiss(checkingToast);
+                    var latest = string.IsNullOrWhiteSpace(updater.LatestVersion)
+                        ? "A newer version"
+                        : $"Base.It v{updater.LatestVersion}";
+                    var ok = await Services.ConfirmDialog.AskAsync(
+                        title:       "Update available",
+                        message:     $"{latest} is available. Install it now? The app will download the update and restart.",
+                        primaryText: "Update now",
+                        cancelText:  "Later");
+                    if (ok) await ApplyUpdateInteractivelyAsync();
+                    break;
+
+                default:
+                    // Failed / Checking-still / network error → silent.
+                    if (checkingToast is not null) toasts.Dismiss(checkingToast);
+                    break;
+            }
         }
         catch
         {
             // Best-effort — never let the update probe break startup.
+            if (checkingToast is not null) toasts.Dismiss(checkingToast);
         }
     }
 
