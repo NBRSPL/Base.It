@@ -30,7 +30,7 @@
                         Classes.error="{Binding Kind, Converter={x:Static svc:ToastKindConverters.IsError}}"
                         Classes.warning="{Binding Kind, Converter={x:Static svc:ToastKindConverters.IsWarning}}"
                         Classes.info="{Binding Kind, Converter={x:Static svc:ToastKindConverters.IsInfo}}">
-                    <Grid ColumnDefinitions="Auto,*,Auto" VerticalAlignment="Center">
+                    <Grid ColumnDefinitions="Auto,*,Auto,Auto" VerticalAlignment="Center">
                         <!-- Kind glyph: filled coloured circle so the type
                              reads at a glance regardless of text length. -->
                         <Border Grid.Column="0" Width="22" Height="22" CornerRadius="11"
@@ -48,7 +48,16 @@
                                        TextWrapping="Wrap"
                                        IsVisible="{Binding ShowMessage}"/>
                         </StackPanel>
-                        <Button Grid.Column="2" Content="✕" Width="24" Height="24"
+                        <!-- Optional action button (sticky toasts only). Click invokes the
+                             toast's Action callback then dismisses the toast. -->
+                        <Button Grid.Column="2" Classes="accent"
+                                Content="{Binding ActionLabel}"
+                                IsVisible="{Binding ShowAction}"
+                                Padding="10,3" MinHeight="0"
+                                FontSize="11.5" FontWeight="SemiBold"
+                                VerticalAlignment="Center" Margin="8,0,0,0"
+                                Click="OnAction"/>
+                        <Button Grid.Column="3" Content="✕" Width="24" Height="24"
                                 MinWidth="24" MinHeight="24" Padding="0"
                                 Background="Transparent" BorderThickness="0"
                                 FontSize="11" Foreground="{DynamicResource App.TextMutedBrush}"

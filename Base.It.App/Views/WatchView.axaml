@@ -119,26 +119,32 @@
                                             <DataTemplate DataType="vm:DriftRowVm">
                                                 <Border Padding="10,3" BorderThickness="0,1,0,0"
                                                         BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}">
-                                                    <Grid ColumnDefinitions="24,*,70,80,1.5*">
+                                                    <Grid ColumnDefinitions="24,32,*,70,80,1.5*">
                                                         <CheckBox Grid.Column="0"
                                                                   IsChecked="{Binding IsSelected, Mode=TwoWay}"
                                                                   VerticalAlignment="Center"
                                                                   Padding="0" MinWidth="0"
                                                                   ToolTip.Tip="Include this row when 'Stage Selected' is pressed."/>
-                                                        <TextBlock Grid.Column="1" Text="{Binding ObjectName}"
+                                                        <Button Grid.Column="1" Classes="rowIconBtn"
+                                                                Click="OnPreviewClick" Tag="{Binding}"
+                                                                VerticalAlignment="Center" HorizontalAlignment="Center"
+                                                                ToolTip.Tip="Preview this row's source + every target's CREATE definition. Pure read; nothing is executed.">
+                                                            <TextBlock Text="👁" FontSize="12"/>
+                                                        </Button>
+                                                        <TextBlock Grid.Column="2" Text="{Binding ObjectName}"
                                                                    VerticalAlignment="Center"
                                                                    Margin="4,0,8,0"
                                                                    TextTrimming="CharacterEllipsis"
                                                                    ToolTip.Tip="{Binding Message}"/>
-                                                        <TextBlock Grid.Column="2" Text="{Binding SourceHash}"
+                                                        <TextBlock Grid.Column="3" Text="{Binding SourceHash}"
                                                                    FontSize="11" Classes="mono" VerticalAlignment="Center"
                                                                    Opacity="0.85"/>
-                                                        <TextBlock Grid.Column="3" Text="{Binding PrimaryStatus}"
+                                                        <TextBlock Grid.Column="4" Text="{Binding PrimaryStatus}"
                                                                    FontSize="11" VerticalAlignment="Center"
                                                                    Foreground="{Binding PrimaryStatus, Converter={x:Static vm:DriftStatusBrushConverter.Instance}}"/>
 
                                                         <!-- Target chips: wraps if many -->
-                                                        <ItemsControl Grid.Column="4" ItemsSource="{Binding TargetTags}"
+                                                        <ItemsControl Grid.Column="5" ItemsSource="{Binding TargetTags}"
                                                                       VerticalAlignment="Center">
                                                             <ItemsControl.ItemsPanel>
                                                                 <ItemsPanelTemplate>

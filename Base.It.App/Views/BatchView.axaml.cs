@@ -2,6 +2,7 @@ using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using Base.It.App.ViewModels;
 
 namespace Base.It.App.Views;
@@ -14,19 +15,75 @@ public partial class BatchView : UserControl, ISupportsFind
         WireSourceFilter();
     }
 
-    private void WireSourceFilter()
+    /// <summary>
+    /// Focus → open the dropdown immediately. AutoCompleteBox normally
+    /// shows the popup only after the user types, which makes the control
+    /// feel like a textbox rather than a dropdown. Pairing this with
+    /// <c>MinimumPrefixLength=0</c> turns it into a proper "click to see
+    /// all options" picker — no chevron click required, though we
+    /// provide one too.
+    /// </summary>
+    private void OnEndpointPickerGotFocus(object? sender, Avalonia.Input.GotFocusEventArgs e)
+    {
+        if (sender is AutoCompleteBox box) box.IsDropDownOpen = true;
+    }
+
+    /// <summary>Chevron next to the source picker — focus + open the dropdown so the user sees every available source.</summary>
+    private void OnSourceChevronClick(object? sender, RoutedEventArgs e)
     {
         var box = this.FindControl<AutoCompleteBox>("SourceBox");
         if (box is null) return;
-        box.ItemFilter = (search, item) =>
+        box.Focus();
+        box.IsDropDownOpen = true;
+    }
+
+    /// <summary>Chevron next to the target picker — focus + open the dropdown so every still-available target is listed.</summary>
+    private void OnTargetChevronClick(object? sender, RoutedEventArgs e)
+    {
+        var box = this.FindControl<AutoCompleteBox>("TargetAddBox");
+        if (box is null) return;
+        box.Focus();
+        box.IsDropDownOpen = true;
+    }
+
+    /// <summary>
+    /// After a target is picked, clear the typed search text so the next
+    /// "Add target" starts with a blank field. The VM's
+    /// OnNextTargetEndpointChanged resets SelectedItem to null already;
+    /// without also wiping Text the picker would show the just-picked
+    /// item's label as residue when the user re-opens the dropdown.
+    /// Deferred via Dispatcher.Post so we don't fight the AutoCompleteBox's
+    /// own selection-change pipeline.
+    /// </summary>
+    private void OnTargetAddSelectionChanged(object? sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not AutoCompleteBox box) return;
+        if (box.SelectedItem is null) return;
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            if (item is not EndpointPick p) return false;
-            if (string.IsNullOrEmpty(search)) return true;
-            var s = search.Trim();
-            return p.Label.Contains(s, System.StringComparison.OrdinalIgnoreCase)
-                || p.Environment.Contains(s, System.StringComparison.OrdinalIgnoreCase)
-                || p.Database.Contains(s, System.StringComparison.OrdinalIgnoreCase);
-        };
+            box.Text = string.Empty;
+            box.SelectedItem = null;
+        }, Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private void WireSourceFilter()
+    {
+        // Same filter shape on both the source picker and the "Add target"
+        // picker — keeps the UX consistent across the two halves of the row.
+        var src = this.FindControl<AutoCompleteBox>("SourceBox");
+        var tgt = this.FindControl<AutoCompleteBox>("TargetAddBox");
+        if (src is not null) src.ItemFilter = EndpointFilter;
+        if (tgt is not null) tgt.ItemFilter = EndpointFilter;
+    }
+
+    private static bool EndpointFilter(string? search, object? item)
+    {
+        if (item is not EndpointPick p) return false;
+        if (string.IsNullOrEmpty(search)) return true;
+        var s = search!.Trim();
+        return p.Label.Contains(s, System.StringComparison.OrdinalIgnoreCase)
+            || p.Environment.Contains(s, System.StringComparison.OrdinalIgnoreCase)
+            || p.Database.Contains(s, System.StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>ISupportsFind: maps the global find overlay to the items-grid name filter.</summary>
@@ -75,6 +132,85 @@ public partial class BatchView : UserControl, ISupportsFind
         if (string.IsNullOrWhiteSpace(text)) return;
         vm.PasteText(text);
         if (sender is TextBox box) box.Text = "";
+    }
+
+    /// <summary>
+    /// Load button — open a file picker for CSV/XLSX. Replaces the old
+    /// "type a path then press Load" flow: power users can still paste a
+    /// path into the textbox next to it; everyone else gets the OS picker.
+    /// </summary>
+    private async void OnLoadClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not BatchViewModel vm) return;
+        var top = TopLevel.GetTopLevel(this);
+        if (top is null) return;
+
+        // If the user already typed a path, honour it — same shortcut as
+        // hitting Enter on the textbox. Picker only opens when there's
+        // nothing to load.
+        if (!string.IsNullOrWhiteSpace(vm.FilePath) && System.IO.File.Exists(vm.FilePath))
+        {
+            vm.LoadFromFileCommand.Execute(null);
+            return;
+        }
+
+        var picks = await top.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title          = "Pick an object list (CSV or XLSX)",
+            AllowMultiple  = false,
+            FileTypeFilter = new[]
+            {
+                new FilePickerFileType("Object lists") { Patterns = new[] { "*.csv", "*.xlsx" } },
+                new FilePickerFileType("CSV")          { Patterns = new[] { "*.csv" } },
+                new FilePickerFileType("XLSX")         { Patterns = new[] { "*.xlsx" } },
+                FilePickerFileTypes.All
+            }
+        });
+        var f = picks?.FirstOrDefault();
+        if (f is null) return;
+
+        var local = f.TryGetLocalPath();
+        if (string.IsNullOrWhiteSpace(local)) return;
+        vm.FilePath = local!;
+        vm.LoadFromFileCommand.Execute(null);
+    }
+
+    /// <summary>
+    /// × button on a selected-target chip — unticks the underlying
+    /// <see cref="TargetPickVm"/> so the chip disappears (via
+    /// CheckedTargets) and the count updates. Mirrors the "click the
+    /// ToggleButton chip to deselect" workflow that used to live in the
+    /// popover, but inline so the user doesn't have to open a flyout.
+    /// </summary>
+    private void OnRemoveTargetClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.Tag is not TargetPickVm t) return;
+        if (DataContext is not BatchViewModel vm) return;
+        e.Handled = true;
+        vm.UncheckTarget(t);
+    }
+
+    /// <summary>
+    /// "View" button on a failed row → open the full-error window with a
+    /// Copy-to-clipboard action. The Message cell only has space for a
+    /// one-liner; real SQL errors are often a full paragraph and the user
+    /// needs the complete text for a ticket / search.
+    /// </summary>
+    private void OnViewErrorClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.Tag is not BatchItem item) return;
+        e.Handled = true;
+
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        var win = new ErrorDetailWindow();
+        win.Show(
+            title:    item.Name,
+            subtitle: $"Failed — row #{item.Index}",
+            body:     item.Message);
+        if (owner is not null) win.ShowDialog(owner);
+        else                   win.Show();
     }
 
     /// <summary>

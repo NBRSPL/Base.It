@@ -5,20 +5,28 @@
              x:Class="Base.It.App.Views.BatchView"
              x:DataType="vm:BatchViewModel">
 
-    <!-- Layout intent: the items grid is the main view. Everything else is
-         compressed to thin top bars so the data dominates the screen.
+    <!-- Layout intent: the items grid is the main view. Toolbars stay
+         compressed so the data dominates the screen. Execute is on its
+         own row below the grid so it's clearly the "I commit" action.
            Row 0  context: profile · source · swap · targets
-           Row 1  actions: file load · DACPAC · backup / execute / clear / remove
-           Row 2  ITEMS: filter strip + custom header + QuickAdd + DataGrid
-           Row 3  status text -->
+           Row 1  actions: file load · DACPAC · Backup (+ auto-name toggle)
+           Row 2  ITEMS: filter strip (with Clear / Remove) + header + QuickAdd + DataGrid
+           Row 3  Execute (full-width, accent — the commit action)
+           Row 4  status text -->
     <DockPanel>
         <ProgressBar DockPanel.Dock="Top" Classes="pageLoader" IsVisible="{Binding IsBusy}"/>
 
-        <Grid RowDefinitions="Auto,Auto,*,Auto">
+        <Grid RowDefinitions="Auto,Auto,*,Auto,Auto">
 
             <!-- ──────────────────── Row 0: context bar ──────────────────── -->
+            <!-- Layout intent: From [source]  →  To [search + selected chips]
+                 [⇄ tiny swap @ end]. Source = single-pick. Target = many-pick
+                 via a searchable AutoCompleteBox + a wrapping chip strip so
+                 the active selection is always visible (not hidden behind a
+                 flyout). Swap is at the row's right edge so it doesn't break
+                 the visual flow between source and targets. -->
             <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
-                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
+                <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto">
 
                     <!-- Profile: tucked into a star button. Click opens a flyout
                          with the saved-pair combo + Save / Delete actions. -->
@@ -58,14 +66,31 @@
                         </Button.Flyout>
                     </Button>
 
-                    <!-- Source label + autocomplete + colour badge inline. -->
-                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6"
-                                Margin="10,0,0,0" VerticalAlignment="Center">
-                        <TextBlock Text="Source" FontSize="12" Opacity="0.7"
-                                   VerticalAlignment="Center"/>
-                        <AutoCompleteBox x:Name="SourceBox" MinWidth="260"
-                                         ItemsSource="{Binding Endpoints}"
+                    <!-- "From" label + source autocomplete + colour badge. Bordered
+                         pill groups source visually as one unit, so it pairs with
+                         the matching "To · Targets" pill on the right. -->
+                    <Border Grid.Column="1" Margin="10,0,0,0"
+                            Background="{DynamicResource App.ElevatedBgBrush}"
+                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                            BorderThickness="1" CornerRadius="6"
+                            Padding="8,4">
+                    <StackPanel Orientation="Horizontal" Spacing="6"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="From" FontSize="11" FontWeight="SemiBold"
+                                   Opacity="0.85" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource App.AccentBrush}"/>
+                        <!-- "Dropdown" wrapper: a Border draws the outer chrome,
+                             AutoCompleteBox is borderless inside, chevron sits
+                             flush on the right. Visually reads as a single
+                             dropdown control while staying searchable. -->
+                        <Border Classes="dropdownShell">
+                        <Grid ColumnDefinitions="*,Auto">
+                        <AutoCompleteBox Grid.Column="0" x:Name="SourceBox" MinWidth="200"
+                                         MinimumPrefixLength="0" FilterMode="Contains"
+                                         BorderThickness="0" Background="Transparent"
+                                         ItemsSource="{Binding SourceCandidateEndpoints}"
                                          SelectedItem="{Binding SelectedSourceEndpoint, Mode=TwoWay}"
+                                         GotFocus="OnEndpointPickerGotFocus"
                                          Watermark="Source">
                             <AutoCompleteBox.ItemTemplate>
                                 <DataTemplate DataType="vm:EndpointPick">
@@ -83,6 +108,20 @@
                                 </DataTemplate>
                             </AutoCompleteBox.ItemTemplate>
                         </AutoCompleteBox>
+                        <!-- Chevron flush against the shell's right edge.
+                             Click focuses the AutoCompleteBox which opens
+                             the dropdown via code-behind. -->
+                        <Button Grid.Column="1"
+                                Padding="8,0" MinWidth="0" MinHeight="0"
+                                Background="Transparent" BorderThickness="0"
+                                VerticalAlignment="Stretch"
+                                Click="OnSourceChevronClick"
+                                ToolTip.Tip="Show all sources">
+                            <TextBlock Text="▾" FontSize="11" Opacity="0.6"
+                                       VerticalAlignment="Center"/>
+                        </Button>
+                        </Grid>
+                        </Border>
                         <Border Classes="badge"
                                 Background="{Binding SourceProfile.Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
                                 IsVisible="{Binding SourceProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
@@ -90,106 +129,254 @@
                             <TextBlock Text="{Binding SourceProfile.Label}"/>
                         </Border>
                     </StackPanel>
+                    </Border>
 
-                    <!-- spacer @ col 2 keeps swap+targets hugging the right edge of the source group -->
+                    <!-- Arrow column: visually links From → To. Same colour as the
+                         accent so it ties to the From/To labels. -->
+                    <TextBlock Grid.Column="2" Text="→" FontSize="22" FontWeight="Bold"
+                               Margin="10,0,10,0" VerticalAlignment="Center"
+                               Foreground="{DynamicResource App.AccentBrush}"/>
 
-                    <!-- Swap source ↔ single ticked target. Compact icon button. -->
-                    <Button Grid.Column="3" Padding="8,4" MinHeight="30" Margin="6,0,0,0"
+                    <!-- "To" pill — same visual treatment as the From pill.
+                         Layout intent: anchor the "To" label, dropdown, and
+                         Clear icon on the LEFT, anchor the "+N more"
+                         overflow pill on the RIGHT, and let the chip strip
+                         fill the middle (with horizontal scroll fallback)
+                         so adding many targets never pushes Clear past the
+                         pill's right edge. -->
+                    <Border Grid.Column="3"
+                            Background="{DynamicResource App.ElevatedBgBrush}"
+                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                            BorderThickness="1" CornerRadius="6"
+                            Padding="8,4" ClipToBounds="True">
+                    <DockPanel LastChildFill="True" VerticalAlignment="Center">
+                        <TextBlock DockPanel.Dock="Left"
+                                   Text="To" FontSize="11" FontWeight="SemiBold"
+                                   Opacity="0.85" VerticalAlignment="Center"
+                                   Margin="0,0,6,0"
+                                   Foreground="{DynamicResource App.AccentBrush}"/>
+                        <Border DockPanel.Dock="Left" Classes="dropdownShell" Margin="0,0,6,0">
+                        <Grid ColumnDefinitions="*,Auto">
+                        <AutoCompleteBox Grid.Column="0" x:Name="TargetAddBox" MinWidth="180"
+                                         MinimumPrefixLength="0" FilterMode="Contains"
+                                         BorderThickness="0" Background="Transparent"
+                                         ItemsSource="{Binding TargetCandidateEndpoints}"
+                                         SelectedItem="{Binding NextTargetEndpoint, Mode=TwoWay}"
+                                         GotFocus="OnEndpointPickerGotFocus"
+                                         SelectionChanged="OnTargetAddSelectionChanged"
+                                         Watermark="Add target">
+                            <AutoCompleteBox.ItemTemplate>
+                                <DataTemplate DataType="vm:EndpointPick">
+                                    <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                                        <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
+                                                 Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                 Margin="0,0,8,0"/>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding Label}" FontSize="12"/>
+                                            <TextBlock Text="{Binding SubLabel}"
+                                                       FontSize="10" Opacity="0.55"
+                                                       IsVisible="{Binding ShowSubLabel}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </AutoCompleteBox.ItemTemplate>
+                        </AutoCompleteBox>
+                        <!-- Chevron — flush against the shell's right edge. -->
+                        <Button Grid.Column="1"
+                                Padding="8,0" MinWidth="0" MinHeight="0"
+                                Background="Transparent" BorderThickness="0"
+                                VerticalAlignment="Stretch"
+                                Click="OnTargetChevronClick"
+                                ToolTip.Tip="Show all targets">
+                            <TextBlock Text="▾" FontSize="11" Opacity="0.6"
+                                       VerticalAlignment="Center"/>
+                        </Button>
+                        </Grid>
+                        </Border>
+                        <!-- Clear-all icon — anchored to the LEFT of the chip
+                             strip so adding more targets never pushes it out.
+                             Icon-only (Segoe Fluent ClearSelection); label
+                             lives on the tooltip. Hidden when nothing is
+                             ticked so the slot collapses cleanly. -->
+                        <Button DockPanel.Dock="Left"
+                                Padding="6,2" MinWidth="0" MinHeight="22"
+                                Margin="0,0,6,0"
+                                IsVisible="{Binding TargetSelectedCount}"
+                                Command="{Binding ClearTargetsCommand}"
+                                ToolTip.Tip="Clear all targets">
+                            <TextBlock Text="&#xE894;"
+                                       FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                       FontSize="11" Opacity="0.85"/>
+                        </Button>
+                        <!-- "+N more" overflow pill — anchored to the RIGHT
+                             edge of the pill so it doesn't shift around as
+                             the chip strip grows. Flyout lists the hidden
+                             selections. -->
+                        <Button DockPanel.Dock="Right"
+                                Padding="6,2" MinHeight="22" FontSize="11"
+                                Margin="6,0,0,0"
+                                IsVisible="{Binding HasCheckedTargetsOverflow}"
+                                ToolTip.Tip="More selected targets — click to see / remove">
+                            <TextBlock Text="{Binding CheckedTargetsOverflowCount, StringFormat='+{0} more'}"
+                                       FontSize="10" FontWeight="SemiBold"/>
+                            <Button.Flyout>
+                                <Flyout Placement="Bottom">
+                                    <ItemsControl ItemsSource="{Binding CheckedTargetsOverflow}" MinWidth="220">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel Orientation="Horizontal"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="vm:TargetPickVm">
+                                                <Border Classes="badge" Margin="2"
+                                                        Background="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}">
+                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                        <TextBlock Text="{Binding Label}"
+                                                                   FontSize="11" FontWeight="SemiBold"
+                                                                   Foreground="White"/>
+                                                        <Button Click="OnRemoveTargetClick" Tag="{Binding}"
+                                                                Padding="3,0" MinWidth="0" MinHeight="0"
+                                                                Background="Transparent" BorderThickness="0">
+                                                            <TextBlock Text="✕" FontSize="10"
+                                                                       Foreground="White" Opacity="0.85"/>
+                                                        </Button>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
+                        <!-- Chip strip fills the middle, wrapped in a
+                             ScrollViewer so an unexpectedly-wide selection
+                             can scroll within bounds instead of pushing
+                             siblings off the row. Visible chips are still
+                             capped via CheckedTargetsVisible; this is a
+                             safety net for edge cases (long labels, etc). -->
+                        <ScrollViewer HorizontalScrollBarVisibility="Hidden"
+                                      VerticalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding CheckedTargetsVisible}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="4"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="vm:TargetPickVm">
+                                        <Border Classes="badge"
+                                                Background="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                VerticalAlignment="Center"
+                                                Padding="6,2"
+                                                ToolTip.Tip="{Binding Label}">
+                                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Label}"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           Foreground="White"/>
+                                                <Button Click="OnRemoveTargetClick" Tag="{Binding}"
+                                                        Padding="3,0" MinWidth="0" MinHeight="0"
+                                                        Background="Transparent" BorderThickness="0"
+                                                        ToolTip.Tip="Remove this target">
+                                                    <TextBlock Text="✕" FontSize="10"
+                                                               Foreground="White" Opacity="0.85"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                    </Border>
+
+                    <!-- spacer @ col 3 takes remaining width -->
+
+                    <!-- Swap source ↔ single ticked target. Tiny icon button
+                         at the row's right edge. Hidden entirely once the
+                         user picks more than one target (ambiguous semantics
+                         there) so it doesn't sit around disabled. -->
+                    <Button Grid.Column="4" Padding="6,2" MinHeight="24" MinWidth="0" Margin="8,0,0,0"
+                            FontSize="11"
                             Command="{Binding SwapCommand}"
                             IsEnabled="{Binding CanSwap}"
+                            IsVisible="{Binding IsSwapVisible}"
                             ToolTip.Tip="Swap source with the single ticked target. Enabled only when exactly one target is ticked.">
-                        <TextBlock Text="⇄" FontSize="14"/>
+                        <TextBlock Text="⇄" FontSize="13"/>
                     </Button>
-
-                    <!-- Targets popover. Button shows the live count; flyout hosts
-                         the filter, select-all/clear, and the chip list. Frees a
-                         whole row of vertical space without losing access. -->
-                    <Button Grid.Column="4" Padding="10,4" MinHeight="30" Margin="6,0,0,0"
-                            ToolTip.Tip="Targets — pick one or more endpoints to push to.">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="Targets" FontSize="12"/>
-                            <Border Classes="countPill">
-                                <TextBlock Text="{Binding TargetSelectedCount}"/>
-                            </Border>
-                            <TextBlock Text="▾" FontSize="11" Opacity="0.6"/>
-                        </StackPanel>
-                        <Button.Flyout>
-                            <Flyout Placement="Bottom">
-                                <StackPanel Spacing="8" MinWidth="360">
-                                    <Grid ColumnDefinitions="*,Auto,Auto">
-                                        <TextBox Grid.Column="0"
-                                                 Text="{Binding TargetFilter, Mode=TwoWay}"
-                                                 Watermark="Filter"/>
-                                        <Button  Grid.Column="1" Margin="6,0,0,0"
-                                                 Content="Select all visible"
-                                                 Command="{Binding SelectAllVisibleTargetsCommand}"/>
-                                        <Button  Grid.Column="2" Margin="4,0,0,0"
-                                                 Content="Clear"
-                                                 Command="{Binding ClearTargetsCommand}"/>
-                                    </Grid>
-                                    <ScrollViewer MaxHeight="320"
-                                                  HorizontalScrollBarVisibility="Disabled"
-                                                  VerticalScrollBarVisibility="Auto">
-                                        <ItemsControl ItemsSource="{Binding FilteredTargets}">
-                                            <ItemsControl.ItemsPanel>
-                                                <ItemsPanelTemplate>
-                                                    <WrapPanel Orientation="Horizontal"/>
-                                                </ItemsPanelTemplate>
-                                            </ItemsControl.ItemsPanel>
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate DataType="vm:TargetPickVm">
-                                                    <ToggleButton Classes="chip"
-                                                                  Content="{Binding Label}"
-                                                                  IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </ScrollViewer>
-                                </StackPanel>
-                            </Flyout>
-                        </Button.Flyout>
-                    </Button>
-
-                    <!-- spacer @ col 5 — keeps the row tidy at the right edge -->
                 </Grid>
             </Border>
 
             <!-- ──────────────────── Row 1: action bar ──────────────────── -->
+            <!-- Left: file load. Right: DACPAC toggle pill · Backup (with
+                 auto-name micro-checkbox beneath). Backup is the only
+                 mutation on this row that touches disk — Execute lives on
+                 its own row below the grid, where it can't be misread as
+                 "just one of the buttons up top". -->
             <Border Grid.Row="1" Classes="toolbar" Margin="0,0,0,6">
-                <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto">
-                    <TextBox Grid.Column="0" Width="280"
+                <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
+                    <!-- Load opens a file picker; the path textbox is for power
+                         users who want to paste a path directly. -->
+                    <Button Grid.Column="0" MinWidth="84" Content="Load…"
+                            Click="OnLoadClick"
+                            ToolTip.Tip="Pick a .csv / .xlsx with one object name per row. (Or paste a path next to it.)"/>
+                    <TextBox Grid.Column="1" Width="240" Margin="6,0,0,0"
                              Text="{Binding FilePath}"
-                             Watermark="File path">
+                             Watermark="…or paste a path">
                         <TextBox.KeyBindings>
                             <KeyBinding Gesture="Enter" Command="{Binding LoadFromFileCommand}"/>
                         </TextBox.KeyBindings>
                     </TextBox>
-                    <Button Grid.Column="1" Margin="4,0,0,0" MinWidth="64" Content="Load"
-                            Command="{Binding LoadFromFileCommand}"/>
 
-                    <!-- DACPAC checkbox inline — still hidden when DACPAC isn't
-                         configured in Settings. -->
-                    <CheckBox Grid.Column="2" Margin="14,0,0,0"
-                              VerticalAlignment="Center"
-                              Content="DACPAC"
-                              IsChecked="{Binding StageAsDacpacBranch}"
-                              IsEnabled="{Binding !IsBusy}"
-                              IsVisible="{Binding DacpacConfigured}"
-                              ToolTip.Tip="Write each successful sync's source definition to the configured DACPAC / SSDT folder. Configured in Settings → DACPAC."/>
+                    <!-- spacer @ col 2 -->
 
-                    <!-- spacer @ col 3 -->
+                    <!-- DACPAC toggle as a chip-style pill — looks more like a
+                         deliberate option than a stray checkbox. Hidden when
+                         DACPAC isn't configured in Settings. -->
+                    <ToggleButton Grid.Column="3" Classes="chip"
+                                  MinHeight="30" Padding="12,4"
+                                  Margin="0,0,8,0"
+                                  IsChecked="{Binding StageAsDacpacBranch}"
+                                  IsEnabled="{Binding !IsBusy}"
+                                  IsVisible="{Binding DacpacConfigured}"
+                                  ToolTip.Tip="Write each successful sync's source definition to the configured DACPAC / SSDT folder. Configured in Settings → DACPAC.">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <TextBlock Text="📦" FontSize="13"/>
+                            <TextBlock Text="DACPAC" FontSize="12" FontWeight="SemiBold"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </ToggleButton>
 
-                    <Button Grid.Column="4" MinWidth="72" Content="Backup"
-                            Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
-                            ToolTip.Tip="Capture each row from source + ticked targets without altering anything."/>
-                    <Button Grid.Column="5" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
-                            Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
-                    <Button Grid.Column="6" Margin="4,0,0,0" MinWidth="64" Content="Clear"
-                            Command="{Binding ClearCommand}"
-                            ToolTip.Tip="Remove every row from the list."/>
-                    <Button Grid.Column="7" Margin="4,0,0,0" MinWidth="120" Content="Remove selected"
-                            Command="{Binding RemoveCheckedCommand}"
-                            ToolTip.Tip="Remove rows whose checkbox is ticked."/>
+                    <!-- Backup + auto-name on a single line. Backup is the
+                         action; Auto-name is its small modifier and sits
+                         AFTER the button (read order: action → option).
+                         Auto-name ticked (default) → Backup uses a
+                         millisecond stamp; unticked → popup prompt for a
+                         custom label on every click. -->
+                    <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="6"
+                                VerticalAlignment="Center">
+                        <Button MinWidth="100" Content="Backup"
+                                Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
+                                ToolTip.Tip="Capture each row from source + ticked targets without altering anything."/>
+                        <!-- Auto-name modifier: rendered as a tiny pill toggle
+                             instead of a stock CheckBox so the indicator size
+                             matches the surrounding text (Avalonia's default
+                             CheckBox glyph is theme-sized and ignored MinHeight
+                             on the previous attempt). ToggleButton + chip class
+                             gives a compact "✓ Auto-name" look. -->
+                        <ToggleButton Classes="chip" MinHeight="22" Padding="6,1"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding UseAutoBackupName}"
+                                      ToolTip.Tip="When ticked, Backup uses a millisecond timestamp. Untick to be prompted for a custom name on every Backup click.">
+                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="✓" FontSize="10" FontWeight="Bold"
+                                           IsVisible="{Binding UseAutoBackupName}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="Auto-name" FontSize="10"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
+                    </StackPanel>
                 </Grid>
             </Border>
 
@@ -208,25 +395,36 @@
                             BorderBrush="{DynamicResource App.StrokeBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="10,6">
-                        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto">
+                        <!-- Left: filter + counters. Right: list-management actions
+                             (Remove selected · Clear). Both belong with the grid,
+                             not with the file-load row above. -->
+                        <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto,Auto">
                             <TextBlock Grid.Column="0" Text="Status" VerticalAlignment="Center"
                                        FontSize="11" Opacity="0.7" Margin="0,0,8,0"/>
                             <ComboBox  Grid.Column="1" Width="120" MinHeight="26"
                                        ItemsSource="{Binding StatusFilterOptions}"
                                        SelectedItem="{Binding StatusFilter}"/>
-                            <!-- spacer @ col 2 -->
-                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="0,0,12,0"
+                            <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="14,0,0,0"
                                        FontSize="11" Opacity="0.55"
                                        Text="{Binding NameFilter, StringFormat='Filtered: {0}'}"
                                        IsVisible="{Binding NameFilter, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
-                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Margin="0,0,12,0"
+                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="14,0,0,0"
                                        FontSize="11"
                                        Foreground="{DynamicResource SystemFillColorSuccessBrush}"
                                        Text="{Binding SuccessCount, StringFormat='OK: {0}'}"/>
-                            <TextBlock Grid.Column="5" VerticalAlignment="Center"
+                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Margin="10,0,0,0"
                                        FontSize="11"
                                        Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                                        Text="{Binding FailCount, StringFormat='Fail: {0}'}"/>
+                            <!-- spacer @ col 5 -->
+                            <Button Grid.Column="6" Padding="8,2" MinHeight="26"
+                                    Content="Remove selected"
+                                    Command="{Binding RemoveCheckedCommand}"
+                                    ToolTip.Tip="Remove rows whose checkbox is ticked."/>
+                            <Button Grid.Column="7" Padding="8,2" MinHeight="26" Margin="6,0,0,0"
+                                    Content="Clear"
+                                    Command="{Binding ClearCommand}"
+                                    ToolTip.Tip="Remove every row from the list."/>
                         </Grid>
                     </Border>
 
@@ -313,14 +511,66 @@
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
-                            <DataGridTextColumn Header="Message"     Binding="{Binding Message}" Width="2*"  IsReadOnly="True"/>
+                            <!-- Message column: text by default. When the row's
+                                 status is Failed, a small "View" button appears
+                                 inline that opens the full error in a window
+                                 with a Copy-to-clipboard action — long error
+                                 messages don't fit in the cell and the user
+                                 needs the full text to share / search. -->
+                            <DataGridTemplateColumn Header="Message" Width="2*" IsReadOnly="True">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate DataType="vm:BatchItem">
+                                        <Grid ColumnDefinitions="*,Auto">
+                                            <TextBlock Grid.Column="0" Text="{Binding Message}"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="CharacterEllipsis"
+                                                       ToolTip.Tip="{Binding Message}"/>
+                                            <Button Grid.Column="1" Margin="6,0,4,0"
+                                                    Padding="8,2" MinHeight="22"
+                                                    FontSize="10"
+                                                    Content="View"
+                                                    Click="OnViewErrorClick" Tag="{Binding}"
+                                                    IsVisible="{Binding HasError}"
+                                                    ToolTip.Tip="Show the full error and copy it to clipboard."/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                         </DataGrid.Columns>
                     </DataGrid>
                 </DockPanel>
             </Border>
 
-            <!-- ──────────────────── Row 3: status text ──────────────────── -->
-            <Border Grid.Row="3" Classes="pageStatus">
+            <!-- ──────────────── Row 3: Execute (the commit action) ──────────────── -->
+            <!-- Two execute paths so the user can be precise about scope:
+                   Execute Selected  → only ticked rows (mirrors "Remove selected")
+                   Execute           → every row visible after the filter
+                 Both are accent-coloured but Execute (the broad action) is the
+                 primary larger one. The hint line on the left summarises
+                 scope so the user knows what's about to run. -->
+            <Border Grid.Row="3" Margin="0,8,0,0">
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBlock Grid.Column="0" Classes="subtle" VerticalAlignment="Center"
+                               Text="{Binding TargetSelectedCount, StringFormat='Will run on {0} target(s). Execute respects the current filter; Execute Selected runs only ticked rows.'}"
+                               IsVisible="{Binding TargetSelectedCount}"
+                               TextWrapping="Wrap"/>
+                    <Button Grid.Column="1"
+                            MinWidth="130" MinHeight="30" FontSize="12"
+                            Content="Execute Selected"
+                            Command="{Binding ExecuteSelectedCommand}"
+                            IsEnabled="{Binding !IsBusy}"
+                            ToolTip.Tip="Run only rows whose checkbox is ticked. Same scope rule as Remove Selected."/>
+                    <Button Grid.Column="2" Classes="accent" Margin="6,0,0,0"
+                            MinWidth="120" MinHeight="30" FontSize="12" FontWeight="SemiBold"
+                            Content="Execute"
+                            Command="{Binding ExecuteCommand}"
+                            IsEnabled="{Binding !IsBusy}"
+                            ToolTip.Tip="Run every row currently visible (respects the active filter)."/>
+                </Grid>
+            </Border>
+
+            <!-- ──────────────────── Row 4: status text ──────────────────── -->
+            <Border Grid.Row="4" Classes="pageStatus">
                 <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
             </Border>
         </Grid>

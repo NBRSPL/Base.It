@@ -219,6 +219,61 @@ public sealed partial class WatchViewModel : ObservableObject
     /// <summary>Raised when the user hits "Send Changed to Batch". MainWindow subscribes to navigate + populate the Batch tab.</summary>
     public event Action<IReadOnlyList<string>, string, string, string>? SendToBatchRequested;
 
+    /// <summary>Raised when a drift row's eye icon is clicked. The view subscribes to open the preview window.</summary>
+    public event Action<BatchPreviewViewModel>? PreviewRequested;
+
+    /// <summary>
+    /// Build a preview for a single drift row. Source endpoint comes from the
+    /// selected group; target endpoints are pulled from the row's
+    /// <see cref="DriftRowVm.TargetStates"/> — every target the watcher has
+    /// reported on, in the order they appear, including in-sync ones so the
+    /// user can confirm they really match. Returns null when the source
+    /// connection isn't resolvable; partial target failures are tolerated by
+    /// the preview window itself (it shows the per-pane error inline).
+    /// </summary>
+    public BatchPreviewViewModel? BuildPreviewForRow(DriftRowVm row)
+    {
+        if (Selected is null || row is null) return null;
+        var g = Selected.Group;
+        var srcConn = _svc.Connections.Get(g.SourceEnv, g.SourceDatabase);
+        if (string.IsNullOrWhiteSpace(srcConn)) return null;
+
+        var endpoints = new List<PreviewEndpoint>();
+        var srcProfile = _svc.Connections.GetProfile(g.SourceEnv, g.SourceDatabase);
+        endpoints.Add(new PreviewEndpoint(
+            Label:            $"Source · {g.SourceEnv} / {g.SourceDatabase}",
+            Color:            srcProfile?.Color,
+            ConnectionString: srcConn));
+
+        // Walk every target the row has been observed against. Match by env+db
+        // because the dictionary key is route-scoped and we want the actual
+        // connection profile for connect string + colour.
+        foreach (var st in row.TargetStates.Values)
+        {
+            var tConn = _svc.Connections.Get(st.Environment, st.Database) ?? "";
+            var tProfile = _svc.Connections.GetProfile(st.Environment, st.Database);
+            endpoints.Add(new PreviewEndpoint(
+                Label:            $"Target · {st.Environment} / {st.Database}",
+                Color:            tProfile?.Color,
+                ConnectionString: tConn));
+        }
+
+        if (endpoints.Count < 2) return null; // source-only preview is pointless
+        return new BatchPreviewViewModel(_svc, row.ObjectName.Trim(), endpoints);
+    }
+
+    /// <summary>Wired from the row's eye icon — fans out to <see cref="PreviewRequested"/> so the view owns the Window.</summary>
+    public void RequestPreview(DriftRowVm row)
+    {
+        var preview = BuildPreviewForRow(row);
+        if (preview is null)
+        {
+            _svc.Toasts.Warning("Nothing to preview", "Pick a group with a reachable source first.");
+            return;
+        }
+        PreviewRequested?.Invoke(preview);
+    }
+
     public WatchViewModel(AppServices svc)
     {
         _svc = svc;

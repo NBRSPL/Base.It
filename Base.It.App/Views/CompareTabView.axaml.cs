@@ -218,9 +218,9 @@ public partial class CompareTabView : UserControl
         // the theme tokens haven't loaded yet (e.g. during startup
         // before App.DiffBgBrush has been resolved).
         var diffBg = ResolveBrush("App.DiffBgBrush",
-            new SolidColorBrush(Color.FromArgb(0xFF, 0x3F, 0x2A, 0x14)));
+            new SolidColorBrush(Color.FromArgb(0xFF, 0x7A, 0x5A, 0x00)));
         var diffFg = ResolveBrush("App.DiffFgBrush",
-            new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xD0, 0x89)));
+            new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xF4, 0xC2)));
 
         for (int i = 0; i < lines.Count; i++)
         {

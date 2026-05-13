@@ -3,6 +3,7 @@ using System.ComponentModel;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
@@ -22,6 +23,7 @@ namespace Base.It.App.Views;
 public partial class BatchPreviewWindow : Window
 {
     private BatchPreviewViewModel? _vm;
+    private string _findText = "";
 
     public BatchPreviewWindow()
     {
@@ -29,7 +31,66 @@ public partial class BatchPreviewWindow : Window
         DataContextChanged += (_, _) => Bind();
         Opened += async (_, _) => { if (_vm is not null) await _vm.LoadAsync(); };
         DetachedFromVisualTree += (_, _) => Unbind();
+
+        // Window-wide Ctrl+F so the find overlay is reachable from
+        // anywhere in this window — mirrors MainWindow's behaviour so
+        // the keystroke means the same thing in every Window that
+        // shows text content. Esc closes via OnFindBoxKeyDown.
+        AddHandler(KeyDownEvent, OnGlobalKeyDown,
+            Avalonia.Interactivity.RoutingStrategies.Bubble | Avalonia.Interactivity.RoutingStrategies.Tunnel);
     }
+
+    /// <summary>Open the find overlay and seed it with the previous query so re-opening picks up where the user left off.</summary>
+    private void OpenFindOverlay()
+    {
+        var ov  = this.FindControl<Border>("FindOverlay");
+        var box = this.FindControl<TextBox>("FindBox");
+        if (ov is null || box is null) return;
+        ov.IsVisible = true;
+        box.Text     = _findText;
+        box.Focus();
+        if (box.Text is { Length: > 0 } t) box.CaretIndex = t.Length;
+    }
+
+    private void HideFindOverlay()
+    {
+        var ov = this.FindControl<Border>("FindOverlay");
+        if (ov is not null) ov.IsVisible = false;
+        if (_findText.Length > 0)
+        {
+            _findText = "";
+            Rebuild(); // clear match highlights
+        }
+    }
+
+    private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            OpenFindOverlay();
+            e.Handled = true;
+        }
+    }
+
+    private void OnFindBoxKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            HideFindOverlay();
+            e.Handled = true;
+        }
+    }
+
+    private void OnFindBoxTextChanged(object? sender, TextChangedEventArgs e)
+    {
+        if (sender is not TextBox tb) return;
+        var next = tb.Text ?? "";
+        if (next == _findText) return;
+        _findText = next;
+        Rebuild(); // re-render with new match highlights
+    }
+
+    private void OnFindClose(object? sender, RoutedEventArgs e) => HideFindOverlay();
 
     private void Bind()
     {
@@ -53,6 +114,22 @@ public partial class BatchPreviewWindow : Window
     private void OnVmPropertyChanged(object? s, PropertyChangedEventArgs e) { /* no-op for now */ }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();
+
+    /// <summary>
+    /// Per-pane Copy → puts that pane's definition on the clipboard.
+    /// Wired from the icon button inside each pane's header (see
+    /// <see cref="BuildHeader"/>). The button's Tag holds the pane's
+    /// text so we don't have to look it up via index. Silent on
+    /// clipboard hiccups.
+    /// </summary>
+    private async void OnCopyPaneClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.Tag is not string text) return;
+        var top = TopLevel.GetTopLevel(this);
+        if (top?.Clipboard is null) return;
+        try { await top.Clipboard.SetTextAsync(text); } catch { }
+    }
 
     private void Rebuild()
     {
@@ -106,7 +183,7 @@ public partial class BatchPreviewWindow : Window
             Padding = new Thickness(10, 6),
             Background = Brushes.Transparent
         };
-        PopulateInlines(text, pane.Lines);
+        PopulateInlines(text, pane.Lines, _findText);
 
         var scroll = new ScrollViewer
         {
@@ -131,7 +208,7 @@ public partial class BatchPreviewWindow : Window
         };
     }
 
-    private static Control BuildHeader(EnvPane pane)
+    private Control BuildHeader(EnvPane pane)
     {
         var badge = new Border
         {
@@ -160,14 +237,39 @@ public partial class BatchPreviewWindow : Window
             Margin = new Thickness(10, 0, 0, 0)
         };
 
+        // Per-pane Copy: a small icon button using the Segoe Fluent Icons
+        // Copy glyph (), tooltip-only label. Tag carries the pane's
+        // definition text so the handler doesn't need to walk the VM.
+        var copyBtn = new Button
+        {
+            Padding         = new Thickness(6, 2),
+            MinWidth        = 0,
+            MinHeight       = 0,
+            Background      = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Tag             = pane.Definition,
+            Content         = new TextBlock
+            {
+                Text       = "",
+                FontFamily = new FontFamily("Segoe Fluent Icons,Segoe MDL2 Assets"),
+                FontSize   = 13,
+                Opacity    = 0.75,
+            },
+        };
+        ToolTip.SetTip(copyBtn, "Copy");
+        copyBtn.Click += OnCopyPaneClick;
+
         var header = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*")
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto")
         };
-        Grid.SetColumn(badge, 0);
-        Grid.SetColumn(meta,  1);
+        Grid.SetColumn(badge,   0);
+        Grid.SetColumn(meta,    1);
+        Grid.SetColumn(copyBtn, 2);
         header.Children.Add(badge);
         header.Children.Add(meta);
+        header.Children.Add(copyBtn);
 
         return new Border
         {
@@ -176,29 +278,84 @@ public partial class BatchPreviewWindow : Window
         };
     }
 
-    private static void PopulateInlines(SelectableTextBlock target, IReadOnlyList<AlignedPaneLine> lines)
+    private static void PopulateInlines(SelectableTextBlock target, IReadOnlyList<AlignedPaneLine> lines, string findText)
     {
         target.Inlines?.Clear();
         if (target.Inlines is null) target.Inlines = new InlineCollection();
 
         var diffBg = ResolveBrush("App.DiffBgBrush",
-            new SolidColorBrush(Color.FromArgb(0xFF, 0x3F, 0x2A, 0x14)));
+            new SolidColorBrush(Color.FromArgb(0xFF, 0x7A, 0x5A, 0x00)));
         var diffFg = ResolveBrush("App.DiffFgBrush",
-            new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xD0, 0x89)));
+            new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xF4, 0xC2)));
+
+        // Find-match colour: distinct from the diff highlight so a line that
+        // is BOTH "different" AND contains a find match shows both treatments
+        // — the diff colour on the full line, with the match segment painted
+        // on top in green. Hardcoded; doesn't need to be themed because the
+        // overlay is a transient interaction.
+        var findBg = new SolidColorBrush(Color.FromArgb(0xFF, 0x22, 0x8B, 0x22));
+        var findFg = Brushes.White;
+
+        var hasFind = !string.IsNullOrEmpty(findText);
 
         for (int i = 0; i < lines.Count; i++)
         {
             var line = lines[i];
-            var run = new Run(line.Text);
-            if (line.State == LineState.Different)
+            var isDiff = line.State == LineState.Different;
+
+            // Split the line into runs at every case-insensitive match of
+            // findText. Segments outside matches get diff styling (if the
+            // whole line is "Different"); match segments get the find
+            // colour stacked on top. No regex — plain substring search.
+            if (hasFind)
             {
-                run.Background = diffBg;
-                run.Foreground = diffFg;
-                run.FontWeight = FontWeight.SemiBold;
+                var text = line.Text;
+                int from = 0;
+                while (from < text.Length)
+                {
+                    var hit = text.IndexOf(findText, from, StringComparison.OrdinalIgnoreCase);
+                    if (hit < 0)
+                    {
+                        AddSegment(target.Inlines!, text.Substring(from), isDiff, diffBg, diffFg, false, findBg, findFg);
+                        break;
+                    }
+                    if (hit > from)
+                        AddSegment(target.Inlines!, text.Substring(from, hit - from), isDiff, diffBg, diffFg, false, findBg, findFg);
+                    AddSegment(target.Inlines!, text.Substring(hit, findText.Length), isDiff, diffBg, diffFg, true, findBg, findFg);
+                    from = hit + findText.Length;
+                }
             }
-            target.Inlines.Add(run);
+            else
+            {
+                AddSegment(target.Inlines!, line.Text, isDiff, diffBg, diffFg, false, findBg, findFg);
+            }
+
             if (i < lines.Count - 1) target.Inlines.Add(new LineBreak());
         }
+    }
+
+    private static void AddSegment(InlineCollection target, string segment,
+        bool isDiff, IBrush diffBg, IBrush diffFg,
+        bool isFindMatch, IBrush findBg, IBrush findFg)
+    {
+        if (segment.Length == 0) return;
+        var run = new Run(segment);
+        // Find-match wins over diff colour so the user always sees the
+        // search hit, even on differing lines. SemiBold is preserved
+        // either way.
+        if (isFindMatch)
+        {
+            run.Background = findBg;
+            run.Foreground = findFg;
+            run.FontWeight = FontWeight.SemiBold;
+        }
+        else if (isDiff)
+        {
+            run.Background = diffBg;
+            run.Foreground = diffFg;
+            run.FontWeight = FontWeight.SemiBold;
+        }
+        target.Add(run);
     }
 
     private static IBrush ResolveBrush(string key, IBrush fallback)

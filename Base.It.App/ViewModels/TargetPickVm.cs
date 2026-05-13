@@ -16,12 +16,15 @@ public sealed partial class TargetPickVm : ObservableObject
     public string Environment { get; }
     public string Database    { get; }
     public string Label       { get; }
+    /// <summary>Connection's profile colour (hex), used by chip backgrounds. Null/blank → default tag styling.</summary>
+    public string? Color      { get; }
 
-    public TargetPickVm(string environment, string database, string label, bool isChecked = false)
+    public TargetPickVm(string environment, string database, string label, bool isChecked = false, string? color = null)
     {
         Environment = environment;
         Database    = database;
         Label       = string.IsNullOrWhiteSpace(label) ? $"{environment} · {database}" : label;
+        Color       = color;
         _isChecked  = isChecked;
     }
 
@@ -36,7 +39,7 @@ public sealed partial class TargetPickVm : ObservableObject
         var label = profile is not null && !string.IsNullOrWhiteSpace(profile.DisplayName)
             ? profile.DisplayName!
             : $"{env} / {database}";
-        return new TargetPickVm(env, database, label, isChecked);
+        return new TargetPickVm(env, database, label, isChecked, profile?.Color);
     }
 
     public string Key => $"{Environment?.ToUpperInvariant()}|{Database?.ToUpperInvariant()}";

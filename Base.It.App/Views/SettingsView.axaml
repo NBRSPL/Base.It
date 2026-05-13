@@ -212,6 +212,57 @@
                     </Expander.Header>
                     <StackPanel DataContext="{Binding Selected}" x:DataType="vm:ConnectionRow">
 
+                        <!-- "Use settings from…" — a small icon button + flyout
+                             (not a full-width combo). Click the ↪ to open a
+                             flyout listing every other saved connection;
+                             pick one and the form's non-identity fields fill
+                             in. Identity (Environment + Database) stays
+                             intact — clone the recipe, keep the name. -->
+                        <Border BorderBrush="{DynamicResource App.StrokeBrush}"
+                                BorderThickness="0,0,0,1"
+                                Padding="0,0,0,8" Margin="0,0,0,12"
+                                DataContext="{Binding $parent[UserControl].((vm:SettingsViewModel)DataContext)}"
+                                x:DataType="vm:SettingsViewModel">
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <Button Padding="6,2" MinHeight="24" MinWidth="0"
+                                    ToolTip.Tip="Reference an existing connection — clone its server / auth / credentials into this form. Environment and Database stay unchanged.">
+                                <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                    <TextBlock Text="↪" FontSize="13"
+                                               Foreground="{DynamicResource App.AccentBrush}"/>
+                                    <TextBlock Text="Use settings from…" FontSize="11"/>
+                                </StackPanel>
+                                <Button.Flyout>
+                                    <Flyout Placement="Bottom">
+                                        <Border Padding="2" MinWidth="260" MaxHeight="320">
+                                            <ScrollViewer VerticalScrollBarVisibility="Auto"
+                                                          HorizontalScrollBarVisibility="Disabled">
+                                                <ItemsControl ItemsSource="{Binding ReferenceCandidates}">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate DataType="vm:ConnectionRow">
+                                                            <Button Padding="8,4" HorizontalAlignment="Stretch"
+                                                                    HorizontalContentAlignment="Left"
+                                                                    Background="Transparent" BorderThickness="0"
+                                                                    Click="OnReferenceRowClick" Tag="{Binding}">
+                                                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                                                    <Border Width="10" Height="10" CornerRadius="5"
+                                                                            Background="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                                            VerticalAlignment="Center"/>
+                                                                    <TextBlock Text="{Binding Environment}" FontWeight="SemiBold" FontSize="12"/>
+                                                                    <TextBlock Text="·" Opacity="0.4"/>
+                                                                    <TextBlock Text="{Binding Database}" FontSize="12"/>
+                                                                </StackPanel>
+                                                            </Button>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </ScrollViewer>
+                                        </Border>
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+                        </StackPanel>
+                        </Border>
+
                         <!-- Compact grid. EVERY form row uses the exact same
                              ColumnDefinitions (90 | * | 12 | 90 | *) so left
                              and right column edges line up across every row

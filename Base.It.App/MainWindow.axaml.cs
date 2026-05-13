@@ -70,7 +70,82 @@ public partial class MainWindow : AppWindow
             // they already have connections, Home is still the best landing
             // (quick dashboard) — users can then click through to any tab.
             SelectByTag("Home");
+            _ = RunDailyUpdateCheckAsync();
         };
+    }
+
+    /// <summary>
+    /// Once-a-day "is there a newer release?" probe. Throttled by
+    /// <see cref="AppSettingsStore.LastUpdateCheckUtc"/> so a user who
+    /// restarts the app five times in an hour only hits GitHub once.
+    /// When an update is available, fire a sticky toast with an "Update
+    /// now" button — clicking it downloads + applies the update and
+    /// restarts the app. Silent on every other outcome (no update, dev
+    /// build, network failure) so the user isn't pestered.
+    /// </summary>
+    private async Task RunDailyUpdateCheckAsync()
+    {
+        try
+        {
+            var updater = Vm.Services.Updater;
+            if (!updater.IsInstalled) return; // dev build or non-Velopack launch
+
+            var settings = Vm.Services.AppSettings;
+            var last     = settings.LastUpdateCheckUtc;
+            var now      = DateTime.UtcNow;
+            if (last is not null && now - last.Value < TimeSpan.FromHours(24)) return;
+
+            // Update the throttle timestamp BEFORE the call — even if the
+            // GitHub fetch fails or the user is offline, we don't want to
+            // re-try on every focus / restart for the next 24h.
+            settings.LastUpdateCheckUtc = now;
+
+            await updater.CheckForUpdatesAsync().ConfigureAwait(true);
+            if (updater.State != Services.UpdateState.Available) return;
+
+            var latest = string.IsNullOrWhiteSpace(updater.LatestVersion) ? "newer version" : $"v{updater.LatestVersion}";
+            Vm.Services.Toasts.PushAction(
+                kind:        Services.ToastKind.Info,
+                title:       "Update available",
+                message:     $"Base.It {latest} is ready to install. Click Update now to download and restart.",
+                actionLabel: "Update now",
+                action:      () => _ = ApplyUpdateInteractivelyAsync());
+        }
+        catch
+        {
+            // Best-effort — never let the update probe break startup.
+        }
+    }
+
+    /// <summary>
+    /// Action wired to the "Update now" button on the update toast.
+    /// Downloads the pending update with a progress toast, then applies +
+    /// restarts. On failure shows an error toast and leaves the app
+    /// running so the user can retry from Settings → Updates.
+    /// </summary>
+    private async Task ApplyUpdateInteractivelyAsync()
+    {
+        var updater = Vm.Services.Updater;
+        var toasts  = Vm.Services.Toasts;
+        try
+        {
+            toasts.Info("Downloading update", "This may take a minute on a slow connection.");
+            await updater.DownloadAsync();
+            if (updater.State == Services.UpdateState.ReadyToApply)
+            {
+                // ApplyAndRestart never returns — the loader swaps the
+                // installed app and re-launches.
+                updater.ApplyAndRestart();
+            }
+            else
+            {
+                toasts.Error("Update failed", string.IsNullOrWhiteSpace(updater.LastError) ? "Unknown error." : updater.LastError);
+            }
+        }
+        catch (Exception ex)
+        {
+            toasts.Error("Update failed", ex.Message);
+        }
     }
 
     private void SelectByTag(string tag)

@@ -26,6 +26,12 @@ public sealed partial class ScriptItem : ObservableObject
         FilePath = filePath;
         FileName = Path.GetFileName(filePath);
     }
+
+    /// <summary>Drives the inline "View" error button — same convention as Batch.</summary>
+    public bool HasError => Status == BatchStatus.Failed && !string.IsNullOrWhiteSpace(Message);
+
+    partial void OnStatusChanged(BatchStatus value) => OnPropertyChanged(nameof(HasError));
+    partial void OnMessageChanged(string value)     => OnPropertyChanged(nameof(HasError));
 }
 
 /// <summary>
@@ -260,5 +266,88 @@ public sealed partial class ScriptsViewModel : ObservableObject
     private void Renumber()
     {
         for (int i = 0; i < Items.Count; i++) Items[i].Index = i + 1;
+    }
+
+    /// <summary>Raised when a row's eye icon is clicked. The view subscribes to open the preview window.</summary>
+    public event Action<BatchPreviewViewModel>? PreviewRequested;
+
+    /// <summary>
+    /// Build a side-by-side preview for one .sql file row. Source pane is
+    /// the file content itself (no fetch — we already have it on disk);
+    /// target panes are fetched per ticked target using the object name
+    /// detected by <see cref="DetectObjectName"/>. When the file doesn't
+    /// reference a recognisable object (e.g. ad-hoc DDL / multiple
+    /// statements), the target panes won't load but the user still sees
+    /// the file content + the list of targets the script will run on.
+    /// </summary>
+    public BatchPreviewViewModel? BuildPreviewForItem(ScriptItem item)
+    {
+        if (item is null || string.IsNullOrWhiteSpace(item.FilePath)) return null;
+        if (!File.Exists(item.FilePath))
+        {
+            _svc.Toasts.Error("File missing", item.FilePath);
+            return null;
+        }
+
+        string fileText;
+        try { fileText = File.ReadAllText(item.FilePath); }
+        catch (Exception ex)
+        {
+            _svc.Toasts.Error("Couldn't read file", ex.Message);
+            return null;
+        }
+
+        var detected = DetectObjectName(fileText);
+        var targets  = Targets.Where(t => t.IsChecked).Select(t =>
+        {
+            var conn    = _svc.Connections.Get(t.Environment, t.Database) ?? "";
+            var profile = _svc.Connections.GetProfile(t.Environment, t.Database);
+            return new PreviewEndpoint(
+                Label:            $"Target · {t.Environment} / {t.Database}",
+                Color:            profile?.Color,
+                ConnectionString: conn);
+        }).ToList();
+
+        var sourceLabel = $"File · {item.FileName}";
+        return BatchPreviewViewModel.ForFileAndTargets(_svc, sourceLabel, fileText, detected, targets);
+    }
+
+    /// <summary>Wired from the eye icon — builds the preview and signals the view to open the window.</summary>
+    public void RequestPreview(ScriptItem item)
+    {
+        var preview = BuildPreviewForItem(item);
+        if (preview is null) return;
+        PreviewRequested?.Invoke(preview);
+    }
+
+    /// <summary>
+    /// Best-effort parse: scan for the first <c>CREATE|ALTER</c>
+    /// <c>PROCEDURE|FUNCTION|VIEW|TRIGGER|TABLE</c> and return
+    /// <c>schema.name</c>. Used by the preview window to fetch the same
+    /// object from each ticked target for a side-by-side diff. Returns null
+    /// when no recognisable header is found — common for ad-hoc DDL or
+    /// data-fix scripts; in that case the preview still shows the file
+    /// content but skips target fetches.
+    /// </summary>
+    private static string? DetectObjectName(string sql)
+    {
+        if (string.IsNullOrWhiteSpace(sql)) return null;
+        // (?im) = case-insensitive + multiline. The regex tolerates square
+        // brackets and an optional schema. Matches the FIRST DDL header
+        // that looks like an object creation we know how to script.
+        var rx = new System.Text.RegularExpressions.Regex(
+            @"\b(?:CREATE|ALTER)\s+(?:PROC(?:EDURE)?|FUNCTION|VIEW|TRIGGER|TABLE)\s+\[?(?<schema>\w+)\]?\.\[?(?<name>\w+)\]?",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            | System.Text.RegularExpressions.RegexOptions.Multiline);
+        var m = rx.Match(sql);
+        if (m.Success) return $"{m.Groups["schema"].Value}.{m.Groups["name"].Value}";
+
+        // Fallback: schema omitted → assume dbo (matches the rest of the app).
+        var rx2 = new System.Text.RegularExpressions.Regex(
+            @"\b(?:CREATE|ALTER)\s+(?:PROC(?:EDURE)?|FUNCTION|VIEW|TRIGGER|TABLE)\s+\[?(?<name>\w+)\]?",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            | System.Text.RegularExpressions.RegexOptions.Multiline);
+        var m2 = rx2.Match(sql);
+        return m2.Success ? $"dbo.{m2.Groups["name"].Value}" : null;
     }
 }

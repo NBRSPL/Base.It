@@ -60,6 +60,30 @@ public sealed class FileBackupStore
     public static string NewRunStamp() => DateTime.Now.ToString("HHmmssfff");
 
     /// <summary>
+    /// Returns true when a backup folder for <paramref name="runStamp"/>
+    /// already exists under today's date directory — used to validate
+    /// user-supplied custom backup names before a run starts. Match is
+    /// "any folder whose name begins with <c>{runStamp}_</c>" so a
+    /// previously-used name is detected across role / env variations
+    /// (e.g. <c>before-feature-x_source_DEV</c>). Case-insensitive on
+    /// Windows-style filesystems.
+    /// </summary>
+    public bool IsRunStampInUseToday(string runStamp)
+    {
+        if (string.IsNullOrWhiteSpace(runStamp)) return false;
+        var dateDir = Path.Combine(_root, DateTime.Now.ToString("yyyy-MM-dd"));
+        if (!Directory.Exists(dateDir)) return false;
+        var prefix = SanitizeSegment(runStamp) + "_";
+        try
+        {
+            return Directory.EnumerateDirectories(dateDir)
+                .Select(d => Path.GetFileName(d) ?? "")
+                .Any(n => n.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
     /// Write a single object's definition to the run-grouped layout.
     /// </summary>
     public string WriteObject(

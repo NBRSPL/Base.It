@@ -110,22 +110,22 @@
                     </Border>
 
                     <!-- Custom column header. Widths: 44 (checkbox), 50 (#),
-                         * (file), 100 (status), 2* (message). -->
+                         * (file name), 40 (preview eye), 100 (status), 2* (message). -->
                     <Border DockPanel.Dock="Top"
                             Background="{DynamicResource App.ElevatedBgBrush}"
                             BorderBrush="{DynamicResource App.StrokeBrush}"
                             BorderThickness="0,0,0,1">
-                        <Grid ColumnDefinitions="44,50,*,100,2*" Margin="0,7">
+                        <Grid ColumnDefinitions="44,50,*,40,100,2*" Margin="0,7">
                             <TextBlock Grid.Column="1" Text="#" FontSize="11" FontWeight="SemiBold"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        Foreground="{DynamicResource App.TextSecondaryBrush}"/>
                             <TextBlock Grid.Column="2" Text="File" FontSize="11" FontWeight="SemiBold"
                                        VerticalAlignment="Center" Margin="6,0,0,0"
                                        Foreground="{DynamicResource App.TextSecondaryBrush}"/>
-                            <TextBlock Grid.Column="3" Text="Status" FontSize="11" FontWeight="SemiBold"
+                            <TextBlock Grid.Column="4" Text="Status" FontSize="11" FontWeight="SemiBold"
                                        VerticalAlignment="Center" Margin="6,0,0,0"
                                        Foreground="{DynamicResource App.TextSecondaryBrush}"/>
-                            <TextBlock Grid.Column="4" Text="Message" FontSize="11" FontWeight="SemiBold"
+                            <TextBlock Grid.Column="5" Text="Message" FontSize="11" FontWeight="SemiBold"
                                        VerticalAlignment="Center" Margin="6,0,0,0"
                                        Foreground="{DynamicResource App.TextSecondaryBrush}"/>
                         </Grid>
@@ -151,10 +151,74 @@
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
                                 </DataGridTemplateColumn>
-                                <DataGridTextColumn Header="#"      Binding="{Binding Index}"    Width="50"  IsReadOnly="True"/>
-                                <DataGridTextColumn Header="File"   Binding="{Binding FilePath}" Width="*"   IsReadOnly="True"/>
-                                <DataGridTextColumn Header="Status" Binding="{Binding Status}"   Width="100" IsReadOnly="True"/>
-                                <DataGridTextColumn Header="Msg"    Binding="{Binding Message}"  Width="2*"  IsReadOnly="True"/>
+                                <DataGridTextColumn Header="#" Binding="{Binding Index}" Width="50" IsReadOnly="True"/>
+                                <!-- File column: shows the filename only, full path
+                                     surfaced via tooltip + right-click menu
+                                     (Open in Explorer / Copy location). -->
+                                <DataGridTemplateColumn Header="File" Width="*">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate DataType="vm:ScriptItem">
+                                            <!-- Border with explicit transparent Background fills the
+                                                 whole cell so right-click registers anywhere on the
+                                                 row's File column — not just on the text itself.
+                                                 Without this the TextBlock only catches hits on the
+                                                 painted glyphs and ContextMenu never opens. -->
+                                            <Border Background="Transparent"
+                                                    Padding="6,0,6,0"
+                                                    VerticalAlignment="Stretch"
+                                                    HorizontalAlignment="Stretch"
+                                                    ToolTip.Tip="{Binding FilePath}">
+                                                <Border.ContextMenu>
+                                                    <ContextMenu>
+                                                        <MenuItem Header="Open in Explorer"
+                                                                  Click="OnOpenInExplorer"
+                                                                  Tag="{Binding}"/>
+                                                        <MenuItem Header="Open file"
+                                                                  Click="OnOpenFile"
+                                                                  Tag="{Binding}"/>
+                                                        <MenuItem Header="Copy location"
+                                                                  Click="OnCopyLocation"
+                                                                  Tag="{Binding}"/>
+                                                    </ContextMenu>
+                                                </Border.ContextMenu>
+                                                <TextBlock Text="{Binding FileName}"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </Border>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <!-- Preview eye: opens file content + per-target diff. -->
+                                <DataGridTemplateColumn Header="" Width="40" CanUserResize="False" CanUserSort="False">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate DataType="vm:ScriptItem">
+                                            <Button Classes="rowIconBtn" Click="OnPreviewClick" Tag="{Binding}"
+                                                    ToolTip.Tip="Preview the file content side-by-side with each ticked target's current definition (when the file references a known object).">
+                                                <TextBlock Text="👁" FontSize="12"/>
+                                            </Button>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
+                                <DataGridTextColumn Header="Status" Binding="{Binding Status}"  Width="100" IsReadOnly="True"/>
+                                <DataGridTemplateColumn Header="Msg" Width="2*" IsReadOnly="True">
+                                    <DataGridTemplateColumn.CellTemplate>
+                                        <DataTemplate DataType="vm:ScriptItem">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0" Text="{Binding Message}"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           ToolTip.Tip="{Binding Message}"/>
+                                                <Button Grid.Column="1" Margin="6,0,4,0"
+                                                        Padding="8,2" MinHeight="22"
+                                                        FontSize="10"
+                                                        Content="View"
+                                                        Click="OnViewErrorClick" Tag="{Binding}"
+                                                        IsVisible="{Binding HasError}"
+                                                        ToolTip.Tip="Show the full error and copy it to clipboard."/>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </DataGridTemplateColumn.CellTemplate>
+                                </DataGridTemplateColumn>
                             </DataGrid.Columns>
                         </DataGrid>
 

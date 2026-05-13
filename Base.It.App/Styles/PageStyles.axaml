@@ -19,6 +19,26 @@
     </Style>
 
     <!-- ============================================================
+         DROPDOWN SHELL — wraps an AutoCompleteBox + chevron Button in
+         a single bordered control so the pair visually reads as one
+         ComboBox-like dropdown. Used by the Source / Target pickers
+         on Batch and Sync. Inner AutoCompleteBox is borderless +
+         transparent (set on the control instance) so the shell border
+         is the only edge.
+         ============================================================ -->
+    <Style Selector="Border.dropdownShell">
+        <Setter Property="Background" Value="{DynamicResource ControlFillColorDefaultBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ControlStrokeColorDefaultBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="MinHeight" Value="30"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+    </Style>
+    <Style Selector="Border.dropdownShell:pointerover">
+        <Setter Property="BorderBrush" Value="{DynamicResource App.StrokeStrongBrush}"/>
+    </Style>
+
+    <!-- ============================================================
          CARDS / PANELS
          ============================================================ -->
     <Style Selector="Border.card">

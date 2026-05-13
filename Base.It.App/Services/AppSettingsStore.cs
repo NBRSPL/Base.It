@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Base.It.App.ViewModels;
+using Base.It.Core.Config;
 
 namespace Base.It.App.Services;
 
@@ -45,6 +46,29 @@ public sealed class AppSettingsStore
     {
         get => _file.BackupRoot;
         set { _file.BackupRoot = value; Save(); }
+    }
+
+    /// <summary>
+    /// Timestamp of the last automatic update check we performed on app
+    /// startup. Used to throttle the daily-check-on-launch logic so we
+    /// don't ping GitHub Releases on every restart. Null = never checked
+    /// (treat as overdue).
+    /// </summary>
+    public DateTime? LastUpdateCheckUtc
+    {
+        get => _file.LastUpdateCheckUtc;
+        set { _file.LastUpdateCheckUtc = value; Save(); }
+    }
+
+    /// <summary>
+    /// Persisted default for Settings → "Copy connection". Whatever the
+    /// user picked from the format dropdown stays selected next launch
+    /// so they don't have to re-pick it every time.
+    /// </summary>
+    public ConnectionFormat ConnectionCopyFormat
+    {
+        get => _file.ConnectionCopyFormat;
+        set { _file.ConnectionCopyFormat = value; Save(); }
     }
 
     /// <summary>
@@ -94,6 +118,8 @@ public sealed class AppSettingsStore
         public ThemePref Theme { get; set; } = ThemePref.Dark;
         public bool HasSeenGettingStarted { get; set; } = false;
         public string? BackupRoot { get; set; } = null;
+        public DateTime? LastUpdateCheckUtc { get; set; } = null;
+        public ConnectionFormat ConnectionCopyFormat { get; set; } = ConnectionFormat.Json;
         public List<EndpointProfile> Profiles { get; set; } = new();
     }
 }

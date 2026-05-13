@@ -12,6 +12,33 @@ public partial class SettingsView : UserControl
     public SettingsView() => InitializeComponent();
 
     /// <summary>
+    /// Flyout row click → tell the VM to clone this connection's fields
+    /// into the currently-selected row. Closes the flyout naturally on
+    /// click; the VM's <c>ReferenceSource</c> setter resets back to null
+    /// so re-picking the same row works.
+    /// </summary>
+    private void OnReferenceRowClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.Tag is not ConnectionRow row) return;
+        if (DataContext is not SettingsViewModel vm) return;
+        e.Handled = true;
+        vm.ReferenceSource = row;
+
+        // Close the parent flyout by walking up the logical tree to find
+        // the Popup the button lives in. Avalonia doesn't expose a direct
+        // "current flyout" handle from the clicked content, but the Popup
+        // ancestor is the visual root of an open flyout — hiding it
+        // dismisses the flyout. Skips quietly if no Popup is found.
+        Avalonia.Controls.Control? cur = btn;
+        while (cur is not null)
+        {
+            if (cur is Avalonia.Controls.Primitives.Popup p) { p.IsOpen = false; break; }
+            cur = cur.Parent as Avalonia.Controls.Control;
+        }
+    }
+
+    /// <summary>
     /// Clicking anywhere on a group node's Expander syncs the right-panel
     /// editor to that group. Without this the rename textbox and member
     /// list would stay on whatever the ComboBox last selected, which is

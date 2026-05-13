@@ -64,11 +64,16 @@
             <Color x:Key="App.FieldErrorBgColor">#2A1418</Color>
 
             <!-- Diff highlight (used by Compare panes + Batch Preview).
-                 Dark: deep amber bg with bright amber-cream fg, well above
-                 the WCAG AA contrast threshold so changed lines stay
-                 legible against the dark surface. -->
-            <Color x:Key="App.DiffBgColor">#3F2A14</Color>
-            <Color x:Key="App.DiffFgColor">#FFD089</Color>
+                 Dark: the BeyondCompare / WinMerge convention — saturated
+                 amber/gold so a changed line reads instantly as
+                 "highlighted with a marker", with high-contrast cream
+                 text on top. Same hue as the dark-mode warning brush
+                 family but distinctly more saturated so it doesn't get
+                 confused with a warning state. -->
+            <Color x:Key="App.DiffBgColor">#7A5A00</Color>
+            <Color x:Key="App.DiffFgColor">#FFF4C2</Color>
+            <!-- Strong accent stripe on the left edge — saturated amber. -->
+            <Color x:Key="App.DiffAccentColor">#FFC107</Color>
 
             <!-- ==== Brushes (bind these from XAML) ==== -->
             <SolidColorBrush x:Key="App.WindowBgBrush" Color="{StaticResource App.WindowBgColor}"/>
@@ -115,6 +120,7 @@
 
             <SolidColorBrush x:Key="App.DiffBgBrush" Color="{StaticResource App.DiffBgColor}"/>
             <SolidColorBrush x:Key="App.DiffFgBrush" Color="{StaticResource App.DiffFgColor}"/>
+            <SolidColorBrush x:Key="App.DiffAccentBrush" Color="{StaticResource App.DiffAccentColor}"/>
 
             <!-- Override FluentAvalonia tokens so existing bindings pick up the sharper palette -->
             <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>
@@ -198,11 +204,13 @@
             <Color x:Key="App.FieldErrorBgColor">#FDECEC</Color>
 
             <!-- Diff highlight (used by Compare panes + Batch Preview).
-                 Light: pale amber bg with dark amber fg — same hue as
-                 dark but inverted lightness so the eye reads "highlight"
-                 in both modes. -->
-            <Color x:Key="App.DiffBgColor">#FFF3D6</Color>
-            <Color x:Key="App.DiffFgColor">#7A4500</Color>
+                 Light: classic highlighter-pen yellow background with
+                 near-black text — the standard "this differs" treatment
+                 in BeyondCompare, WinMerge, KDiff3, etc. High punch on
+                 a white card without being a warning red/orange. -->
+            <Color x:Key="App.DiffBgColor">#FFF176</Color>
+            <Color x:Key="App.DiffFgColor">#1A1209</Color>
+            <Color x:Key="App.DiffAccentColor">#F57F17</Color>
 
             <!-- ==== Brushes ==== -->
             <SolidColorBrush x:Key="App.WindowBgBrush" Color="{StaticResource App.WindowBgColor}"/>
@@ -249,6 +257,7 @@
 
             <SolidColorBrush x:Key="App.DiffBgBrush" Color="{StaticResource App.DiffBgColor}"/>
             <SolidColorBrush x:Key="App.DiffFgBrush" Color="{StaticResource App.DiffFgColor}"/>
+            <SolidColorBrush x:Key="App.DiffAccentBrush" Color="{StaticResource App.DiffAccentColor}"/>
 
             <!-- Override FluentAvalonia tokens -->
             <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>

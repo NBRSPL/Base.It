@@ -18,6 +18,8 @@ namespace Base.It.App.Views;
 /// </summary>
 public partial class ScriptsView : UserControl
 {
+    private ScriptsViewModel? _hookedVm;
+
     public ScriptsView()
     {
         InitializeComponent();
@@ -27,6 +29,126 @@ public partial class ScriptsView : UserControl
         // so it doesn't block the drop.
         AddHandler(DragDrop.DragOverEvent, OnDragOver);
         AddHandler(DragDrop.DropEvent,     OnDrop);
+        DataContextChanged += OnDataContextChanged;
+        DetachedFromVisualTree += (_, _) => UnhookVm();
+    }
+
+    private void OnDataContextChanged(object? sender, EventArgs e)
+    {
+        UnhookVm();
+        if (DataContext is ScriptsViewModel vm)
+        {
+            _hookedVm = vm;
+            vm.PreviewRequested += OnPreviewRequested;
+        }
+    }
+
+    private void UnhookVm()
+    {
+        if (_hookedVm is null) return;
+        _hookedVm.PreviewRequested -= OnPreviewRequested;
+        _hookedVm = null;
+    }
+
+    /// <summary>
+    /// "View" button on a failed row → open the full error in its own
+    /// window with a Copy action. Same affordance Batch uses, so failed
+    /// scripts surface their actual SQL error rather than a clipped cell.
+    /// </summary>
+    private void OnViewErrorClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.Tag is not ScriptItem item) return;
+        e.Handled = true;
+
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        var win = new ErrorDetailWindow();
+        win.Show(
+            title:    item.FileName,
+            subtitle: $"Failed — row #{item.Index}",
+            body:     item.Message);
+        if (owner is not null) win.ShowDialog(owner);
+        else                   win.Show();
+    }
+
+    /// <summary>
+    /// Eye icon → ask the VM to build a preview (file content + per-target
+    /// fetches when the script's object can be detected), then open the
+    /// shared diff window.
+    /// </summary>
+    private void OnPreviewClick(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn) return;
+        if (btn.Tag is not ScriptItem item) return;
+        if (DataContext is not ScriptsViewModel vm) return;
+        e.Handled = true;
+        vm.RequestPreview(item);
+    }
+
+    private void OnPreviewRequested(BatchPreviewViewModel preview)
+    {
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        var win = new BatchPreviewWindow { DataContext = preview };
+        if (owner is not null) win.ShowDialog(owner);
+        else                   win.Show();
+    }
+
+    /// <summary>
+    /// Right-click → Open in Explorer. Launches the OS file browser at the
+    /// file's parent folder with the file pre-selected (Windows-only
+    /// flag; falls back to opening the folder on other platforms).
+    /// </summary>
+    private void OnOpenInExplorer(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem mi || mi.Tag is not ScriptItem item) return;
+        if (string.IsNullOrWhiteSpace(item.FilePath) || !File.Exists(item.FilePath)) return;
+        try
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName        = "explorer.exe",
+                    Arguments       = $"/select,\"{item.FilePath}\"",
+                    UseShellExecute = true,
+                });
+            }
+            else
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName        = Path.GetDirectoryName(item.FilePath) ?? item.FilePath,
+                    UseShellExecute = true,
+                });
+            }
+        }
+        catch { /* best-effort — explorer failures aren't worth a toast */ }
+    }
+
+    /// <summary>Right-click → Copy location. Puts the absolute path on the clipboard.</summary>
+    private async void OnCopyLocation(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem mi || mi.Tag is not ScriptItem item) return;
+        if (string.IsNullOrWhiteSpace(item.FilePath)) return;
+        var top = TopLevel.GetTopLevel(this);
+        if (top?.Clipboard is null) return;
+        await top.Clipboard.SetTextAsync(item.FilePath);
+    }
+
+    /// <summary>Right-click → Open file. Launches the OS default app for .sql (usually SSMS or a text editor).</summary>
+    private void OnOpenFile(object? sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem mi || mi.Tag is not ScriptItem item) return;
+        if (string.IsNullOrWhiteSpace(item.FilePath) || !File.Exists(item.FilePath)) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName        = item.FilePath,
+                UseShellExecute = true,
+            });
+        }
+        catch { /* best-effort */ }
     }
 
     private void OnDragOver(object? sender, DragEventArgs e)

@@ -22,6 +22,12 @@ public sealed partial class BatchItem : ObservableObject
     [ObservableProperty] private BatchStatus _status  = BatchStatus.Pending;
     [ObservableProperty] private string      _message = "";
     public BatchItem(string name) { _name = name; }
+
+    /// <summary>Drives the inline "View" button visibility: only failed rows expose their full error.</summary>
+    public bool HasError => Status == BatchStatus.Failed && !string.IsNullOrWhiteSpace(Message);
+
+    partial void OnStatusChanged(BatchStatus value)  => OnPropertyChanged(nameof(HasError));
+    partial void OnMessageChanged(string value)      => OnPropertyChanged(nameof(HasError));
 }
 
 /// <summary>
@@ -59,6 +65,23 @@ public sealed partial class BatchViewModel : ObservableObject
     [ObservableProperty] private bool _stageAsDacpacBranch;
     [ObservableProperty] private bool _dacpacConfigured;
 
+    // Optional user-supplied label for this run's backup folder. When empty,
+    // FileBackupStore generates a millisecond timestamp like "HHmmssfff". When
+    // set, the user's label becomes the folder prefix (e.g.
+    // "before-feature-x_source_DEV") so the run is easy to find later.
+    // Populated by the popup prompt in Backup/Execute when UseAutoBackupName
+    // is unticked; cleared at the end of every run.
+    [ObservableProperty] private string _customBackupName = "";
+    [ObservableProperty] private string _customBackupNameError = "";
+
+    /// <summary>
+    /// When true (default), Backup / Execute uses a millisecond timestamp
+    /// for the run-folder name. When false, the user is prompted on each
+    /// click for a custom label so they can find specific runs later
+    /// (e.g. "before-feature-x").
+    /// </summary>
+    [ObservableProperty] private bool _useAutoBackupName = true;
+
     // Seeds StageAsDacpacBranch from settings once; prevents later refreshes
     // (e.g. after Settings "Save All") from clobbering the user's toggle.
     private bool _dacpacDefaultsApplied;
@@ -73,8 +96,73 @@ public sealed partial class BatchViewModel : ObservableObject
     public ObservableCollection<EndpointProfile>  Profiles        { get; } = new();
     public ObservableCollection<TargetPickVm>     FilteredTargets { get; } = new();
 
+    /// <summary>
+    /// Endpoints minus every ticked target — what the SOURCE picker should
+    /// show. You can't sync from a target to itself, so once a target is
+    /// ticked it should disappear from the source dropdown. Recomputed
+    /// whenever the source or any target's IsChecked changes.
+    /// </summary>
+    public ObservableCollection<EndpointPick> SourceCandidateEndpoints { get; } = new();
+
+    /// <summary>
+    /// Endpoints minus the source and minus every ticked target — what
+    /// the "Add target" picker should show. Avoids the user picking the
+    /// source as a target, or picking the same target twice.
+    /// </summary>
+    public ObservableCollection<EndpointPick> TargetCandidateEndpoints { get; } = new();
+
+    /// <summary>
+    /// Live mirror of every <see cref="TargetPickVm"/> with IsChecked=true.
+    /// The view's tag-chip strip binds to this so the user can see every
+    /// selected target at a glance (mirroring how the source picker shows
+    /// its current selection as a coloured badge). Kept in sync by
+    /// <see cref="OnTargetPropertyChanged"/> and <see cref="RebuildTargets"/>.
+    /// </summary>
+    public ObservableCollection<TargetPickVm> CheckedTargets { get; } = new();
+
+    /// <summary>
+    /// First N of <see cref="CheckedTargets"/> — what the toolbar chip
+    /// strip actually renders so it doesn't push past the row width when
+    /// many targets are ticked. Excess is surfaced via
+    /// <see cref="CheckedTargetsOverflow"/> + a "+N more" pill.
+    /// </summary>
+    public ObservableCollection<TargetPickVm> CheckedTargetsVisible { get; } = new();
+
+    /// <summary>
+    /// Tail beyond the visible cap — shown in the +N flyout when the user
+    /// hovers / clicks the overflow pill. Identical content to the
+    /// visible slice; just split for layout reasons.
+    /// </summary>
+    public ObservableCollection<TargetPickVm> CheckedTargetsOverflow { get; } = new();
+
+    /// <summary>Max chips rendered inline in the toolbar before overflowing into +N.</summary>
+    private const int VisibleTargetChipsMax = 3;
+
+    /// <summary>Bound to the overflow pill — shows "+N" so the user knows there are more selections beyond the visible ones.</summary>
+    public int CheckedTargetsOverflowCount => CheckedTargetsOverflow.Count;
+
+    /// <summary>Drives the +N pill's IsVisible so it disappears when the count fits inline.</summary>
+    public bool HasCheckedTargetsOverflow => CheckedTargetsOverflow.Count > 0;
+
+    /// <summary>
+    /// Pick proxy bound to the "Add target" AutoCompleteBox. Setting it
+    /// ticks the matching <see cref="TargetPickVm"/> and then resets to
+    /// null so the picker is ready for the next add. Pattern matches the
+    /// way Source's <see cref="SelectedSourceEndpoint"/> drives its
+    /// underlying state — but for many-at-a-time instead of one.
+    /// </summary>
+    [ObservableProperty] private EndpointPick? _nextTargetEndpoint;
+
     public bool CanSwap =>
         SelectedSourceEndpoint is not null && Targets.Count(t => t.IsChecked) == 1;
+
+    /// <summary>
+    /// Swap only makes sense for a 1-to-1 pairing. Once the user has picked
+    /// multiple targets the operation is ambiguous, so the button hides
+    /// entirely rather than sitting there disabled. Stays visible at 0 or 1
+    /// ticked targets so the affordance is discoverable.
+    /// </summary>
+    public bool IsSwapVisible => Targets.Count(t => t.IsChecked) <= 1;
 
     public int TargetSelectedCount => Targets.Count(t => t.IsChecked);
     public int TargetTotalCount    => Targets.Count;
@@ -143,10 +231,20 @@ public sealed partial class BatchViewModel : ObservableObject
         RebuildFilteredItems();
     }
 
+    /// <summary>
+    /// True while an execute / backup run is in progress. Used to suppress
+    /// per-status-change filter rebuilds: without this, every time a row
+    /// transitions to <see cref="BatchStatus.Running"/> the filtered list
+    /// drops it (because the filter wants Skipped / Success / etc.), which
+    /// makes rows visibly jump in and out mid-run.
+    /// </summary>
+    private bool _suppressFilterRebuild;
+
     private void OnItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(BatchItem.Status))
-            RebuildFilteredItems();
+        if (e.PropertyName != nameof(BatchItem.Status)) return;
+        if (_suppressFilterRebuild) return;
+        RebuildFilteredItems();
     }
 
     partial void OnStatusFilterChanged(string value) => RebuildFilteredItems();
@@ -321,6 +419,7 @@ public sealed partial class BatchViewModel : ObservableObject
         // Detach IsChecked listeners before clearing so we don't leak.
         foreach (var t in Targets) t.PropertyChanged -= OnTargetPropertyChanged;
         Targets.Clear();
+        CheckedTargets.Clear();
 
         foreach (var cfg in EnvironmentListProvider.VisibleConnections(_svc))
         {
@@ -333,15 +432,129 @@ public sealed partial class BatchViewModel : ObservableObject
                 isChecked: previouslyChecked.Contains(keyCheck));
             pick.PropertyChanged += OnTargetPropertyChanged;
             Targets.Add(pick);
+            if (pick.IsChecked) CheckedTargets.Add(pick);
         }
         RebuildFilteredTargets();
+        RebuildEndpointCandidates();
+        RebuildCheckedTargetSlices();
         NotifyTargetCounts();
     }
 
     private void OnTargetPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(TargetPickVm.IsChecked))
-            NotifyTargetCounts();
+        if (e.PropertyName != nameof(TargetPickVm.IsChecked)) return;
+        NotifyTargetCounts();
+
+        // Mirror IsChecked transitions into CheckedTargets so the view's
+        // tag strip stays in sync. Using add/remove (not Clear+rebuild)
+        // keeps the chip animations / focus stable when an item flips.
+        if (sender is TargetPickVm vm)
+        {
+            if (vm.IsChecked && !CheckedTargets.Contains(vm))
+                CheckedTargets.Add(vm);
+            else if (!vm.IsChecked)
+                CheckedTargets.Remove(vm);
+        }
+
+        // A ticked target should disappear from BOTH dropdowns; an
+        // unticked one should reappear in the target picker.
+        RebuildEndpointCandidates();
+        RebuildCheckedTargetSlices();
+    }
+
+    /// <summary>
+    /// Re-partition <see cref="CheckedTargets"/> into the visible /
+    /// overflow slices. Visible holds the first <see cref="VisibleTargetChipsMax"/>
+    /// items; the rest go into overflow and surface via a "+N more" pill.
+    /// Called whenever the checked set changes.
+    /// </summary>
+    private void RebuildCheckedTargetSlices()
+    {
+        CheckedTargetsVisible.Clear();
+        CheckedTargetsOverflow.Clear();
+        var i = 0;
+        foreach (var t in CheckedTargets)
+        {
+            if (i < VisibleTargetChipsMax) CheckedTargetsVisible.Add(t);
+            else                           CheckedTargetsOverflow.Add(t);
+            i++;
+        }
+        OnPropertyChanged(nameof(CheckedTargetsOverflowCount));
+        OnPropertyChanged(nameof(HasCheckedTargetsOverflow));
+    }
+
+    /// <summary>
+    /// Recompute the source / target candidate lists used by their
+    /// respective AutoCompleteBoxes. Excluded sets:
+    ///   SourceCandidateEndpoints = Endpoints \ ticked targets
+    ///   TargetCandidateEndpoints = Endpoints \ source \ ticked targets
+    /// Triggered whenever Endpoints / source / ticked targets change.
+    ///
+    /// IMPORTANT: the actual mutation is deferred to the next dispatcher
+    /// tick via <see cref="Avalonia.Threading.Dispatcher.UIThread.Post"/>.
+    /// Without this, picking an item in either AutoCompleteBox would
+    /// synchronously clear + rebuild the very <c>ItemsSource</c> the
+    /// control is mid-processing and crash. Posting back to the UI
+    /// thread lets the current binding callback finish first.
+    /// </summary>
+    private void RebuildEndpointCandidates()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            RebuildEndpointCandidatesCore,
+            Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private void RebuildEndpointCandidatesCore()
+    {
+        bool MatchesSource(EndpointPick ep) =>
+            !string.IsNullOrWhiteSpace(SourceEnv) && !string.IsNullOrWhiteSpace(SourceDatabase) &&
+            string.Equals(ep.Environment, SourceEnv,      StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(ep.Database,    SourceDatabase, StringComparison.OrdinalIgnoreCase);
+
+        bool MatchesAnyTicked(EndpointPick ep) =>
+            CheckedTargets.Any(t =>
+                string.Equals(t.Environment, ep.Environment, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.Database,    ep.Database,    StringComparison.OrdinalIgnoreCase));
+
+        SourceCandidateEndpoints.Clear();
+        TargetCandidateEndpoints.Clear();
+        foreach (var ep in Endpoints)
+        {
+            if (!MatchesAnyTicked(ep))    SourceCandidateEndpoints.Add(ep);
+            if (!MatchesSource(ep) && !MatchesAnyTicked(ep))
+                                          TargetCandidateEndpoints.Add(ep);
+        }
+    }
+
+    /// <summary>
+    /// Adding a target via the "Add target" picker. Setting
+    /// <see cref="NextTargetEndpoint"/> ticks the matching target and
+    /// resets the picker back to null so it's ready for the next add.
+    /// Match is case-insensitive on (env, database).
+    /// </summary>
+    partial void OnNextTargetEndpointChanged(EndpointPick? value)
+    {
+        if (value is null) return;
+        var t = Targets.FirstOrDefault(t =>
+            string.Equals(t.Environment, value.Environment, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(t.Database,    value.Database,    StringComparison.OrdinalIgnoreCase));
+        if (t is not null && !t.IsChecked) t.IsChecked = true;
+        // Reset so the picker shows the watermark again — without this the
+        // user has to manually clear before adding a second target.
+        NextTargetEndpoint = null;
+    }
+
+    /// <summary>
+    /// Remove a single target from the selected set. Wired from the × on
+    /// each chip in the view; equivalent to unticking the underlying
+    /// <see cref="TargetPickVm"/>, which fans out through
+    /// <see cref="OnTargetPropertyChanged"/> to remove from
+    /// <see cref="CheckedTargets"/> automatically.
+    /// </summary>
+    public void UncheckTarget(TargetPickVm t)
+    {
+        if (t is null) return;
+        t.IsChecked = false;
     }
 
     partial void OnTargetFilterChanged(string value) => RebuildFilteredTargets();
@@ -363,6 +576,7 @@ public sealed partial class BatchViewModel : ObservableObject
     private void NotifyTargetCounts()
     {
         OnPropertyChanged(nameof(CanSwap));
+        OnPropertyChanged(nameof(IsSwapVisible));
         OnPropertyChanged(nameof(TargetSelectedCount));
         OnPropertyChanged(nameof(TargetTotalCount));
     }
@@ -465,6 +679,49 @@ public sealed partial class BatchViewModel : ObservableObject
         return first is null
             ? $"{SourceEnv}/{SourceDatabase}"
             : $"{SourceDatabase}: {SourceEnv} → {first.Environment}";
+    }
+
+    /// <summary>
+    /// Decide the run-stamp the next backup / execute click will use:
+    ///   - When <see cref="UseAutoBackupName"/> is true → fresh millisecond
+    ///     timestamp, no prompt.
+    ///   - When false → pop a name prompt; validate uniqueness against
+    ///     today's date folder; loop until the user enters a free name or
+    ///     cancels. Cancel returns false so the caller bails cleanly.
+    /// Returns <c>("", false)</c> on cancel, <c>(stamp, true)</c> on success.
+    /// </summary>
+    private async Task<(string Stamp, bool Ok)> ResolveRunStampAsync(string promptTitle)
+    {
+        CustomBackupNameError = "";
+
+        if (UseAutoBackupName)
+            return (Base.It.Core.Backup.FileBackupStore.NewRunStamp(), true);
+
+        // Loop until valid + free, or the user cancels. Showing the dialog
+        // multiple times rather than reporting an error from the toolbar
+        // keeps the conflict resolution close to where the user just typed.
+        string suggested = (CustomBackupName ?? "").Trim();
+        while (true)
+        {
+            var input = await PromptDialog.AskAsync(
+                title:        promptTitle,
+                message:      "Name this run's backup folder so you can find it later (e.g. 'before-feature-x'). Must be unique within today's backups.",
+                initialValue: suggested,
+                watermark:    "Backup name",
+                primaryText:  "OK");
+            if (string.IsNullOrWhiteSpace(input)) return ("", false);
+
+            input = input.Trim();
+            if (_svc.Backups.IsRunStampInUseToday(input))
+            {
+                _svc.Toasts.Warning("Name in use", $"A backup folder named '{input}' already exists for today.");
+                suggested = input;
+                continue;
+            }
+
+            CustomBackupName = input;
+            return (input, true);
+        }
     }
 
     [RelayCommand]
@@ -621,13 +878,32 @@ public sealed partial class BatchViewModel : ObservableObject
         _svc.Toasts.Info("Batch cleared", $"Removed {n} row(s).");
     }
 
+    /// <summary>
+    /// Default Execute respects the active filter / search — runs every row
+    /// in <see cref="FilteredItems"/>. Hidden rows aren't touched. Pattern
+    /// matches every other "table action" in the app (Search → see filtered
+    /// → act on what you see).
+    /// </summary>
     [RelayCommand]
-    private async Task ExecuteAsync()
+    private Task ExecuteAsync() => ExecuteCoreAsync(FilteredItems.ToList(), "Nothing visible to run", "filtered rows");
+
+    /// <summary>
+    /// Execute Selected runs only rows where the row's checkbox is ticked
+    /// — same convention as Remove Selected. Lets the user pin a subset
+    /// with the row checkboxes and run just that.
+    /// </summary>
+    [RelayCommand]
+    private Task ExecuteSelectedAsync() => ExecuteCoreAsync(
+        Items.Where(i => i.IsSelected).ToList(),
+        emptyMsg: "Tick rows first",
+        scopeLabel: "selected rows");
+
+    private async Task ExecuteCoreAsync(List<BatchItem> work, string emptyMsg, string scopeLabel)
     {
-        if (Items.Count == 0)
+        if (work.Count == 0)
         {
-            Status = "No objects to execute.";
-            _svc.Toasts.Warning("Nothing to run", "Add rows to the list or load a CSV / XLSX first.");
+            Status = $"No {scopeLabel} to execute.";
+            _svc.Toasts.Warning(emptyMsg, $"Nothing in {scopeLabel} to run.");
             return;
         }
         if (string.IsNullOrWhiteSpace(SourceEnv) || string.IsNullOrWhiteSpace(SourceDatabase))
@@ -661,14 +937,29 @@ public sealed partial class BatchViewModel : ObservableObject
         // tiny zip per object × target.
         var batchBackupPaths = new List<string>();
 
+        // Resolve & validate the run-stamp BEFORE flipping IsBusy so the
+        // error path doesn't leave the UI stuck on a spinner. When the
+        // auto-name toggle is off, this awaits a popup for the user's
+        // label and validates uniqueness against today's folder.
+        var (batchRunStamp, stampOk) = await ResolveRunStampAsync("Name this execute run");
+        if (!stampOk) return;
         IsBusy = true; SuccessCount = FailCount = 0;
+        // Reset every row in the work-set BEFORE the loop so a re-run
+        // doesn't mix stale Running / Success states with the new run's
+        // progression. The filter rebuild is suppressed below, so the
+        // batch status flicker is invisible to the user.
+        _suppressFilterRebuild = true;
+        foreach (var item in work)
+        {
+            item.Status  = BatchStatus.Pending;
+            item.Message = "";
+        }
         // ONE stamp for the whole batch click — every source + target
         // backup file lands under the same {date}\{stamp}_*\... tree so
         // a Scripts-pane revert can target one folder and run cleanly.
-        var batchRunStamp = Base.It.Core.Backup.FileBackupStore.NewRunStamp();
         try
         {
-            foreach (var item in Items.ToList())
+            foreach (var item in work)
             {
                 item.Status  = BatchStatus.Running;
                 item.Message = "";
@@ -823,7 +1114,14 @@ public sealed partial class BatchViewModel : ObservableObject
             else if (SuccessCount == 0 && FailCount > 0)   _svc.Toasts.Error("Batch failed", summary);
             else                                            _svc.Toasts.Info("Batch finished", summary);
         }
-        finally { IsBusy = false; }
+        finally
+        {
+            IsBusy = false;
+            // Re-enable per-status filter rebuilds and run one explicit
+            // rebuild so the visible list catches up to the new statuses.
+            _suppressFilterRebuild = false;
+            RebuildFilteredItems();
+        }
     }
 
     /// <summary>
@@ -841,10 +1139,21 @@ public sealed partial class BatchViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(srcConn) && checkedTargets.Count == 0)
         { Status = "No source or target connection configured."; return; }
 
+        var (backupRunStamp, stampOk) = await ResolveRunStampAsync("Name this backup");
+        if (!stampOk) return;
         IsBusy = true; SuccessCount = FailCount = 0;
+        // Suppress per-status filter rebuilds during the loop so rows
+        // don't disappear from the visible list as they cycle through
+        // Running → Success/Skipped/Failed. One final rebuild runs in
+        // the finally block.
+        _suppressFilterRebuild = true;
+        foreach (var item in Items.ToList())
+        {
+            item.Status  = BatchStatus.Pending;
+            item.Message = "";
+        }
         // One stamp for the whole Backup click — same grouping rule as
         // Execute, just without ALTER on targets.
-        var backupRunStamp = Base.It.Core.Backup.FileBackupStore.NewRunStamp();
         try
         {
             foreach (var item in Items.ToList())
@@ -890,7 +1199,12 @@ public sealed partial class BatchViewModel : ObservableObject
             if (FailCount == 0 && SuccessCount > 0) _svc.Toasts.Success("Backup complete", $"{SuccessCount} saved · {FailCount} failed.");
             else if (FailCount > 0)                  _svc.Toasts.Warning("Backup finished with errors", $"{SuccessCount} saved · {FailCount} failed.");
         }
-        finally { IsBusy = false; }
+        finally
+        {
+            IsBusy = false;
+            _suppressFilterRebuild = false;
+            RebuildFilteredItems();
+        }
     }
 
     private static void Tally(Base.It.Core.Backup.BackupOutcome r,

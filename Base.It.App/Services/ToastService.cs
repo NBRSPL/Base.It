@@ -16,7 +16,17 @@ public sealed partial class ToastItem : ObservableObject
     public ToastKind Kind   { get; init; }
     [ObservableProperty] private string _title   = "";
     [ObservableProperty] private string _message = "";
+
+    /// <summary>
+    /// Optional action button shown on the toast. When non-empty, the toast
+    /// becomes "sticky" (no auto-dismiss) so the user has time to act on it.
+    /// </summary>
+    public string ActionLabel { get; init; } = "";
+    public Action? Action { get; init; }
+
     public bool ShowMessage => !string.IsNullOrWhiteSpace(Message);
+    public bool ShowAction  => !string.IsNullOrWhiteSpace(ActionLabel) && Action is not null;
+    public bool IsSticky    => ShowAction;
 
     public string KindClass => Kind switch
     {
@@ -49,24 +59,47 @@ public sealed class ToastService
     private static readonly TimeSpan DefaultLife = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan ErrorLife   = TimeSpan.FromSeconds(7);
 
-    public void Info   (string title, string message = "") => Push(ToastKind.Info,    title, message, DefaultLife);
-    public void Success(string title, string message = "") => Push(ToastKind.Success, title, message, DefaultLife);
-    public void Warning(string title, string message = "") => Push(ToastKind.Warning, title, message, DefaultLife);
-    public void Error  (string title, string message = "") => Push(ToastKind.Error,   title, message, ErrorLife);
+    public void Info   (string title, string message = "") => Push(new ToastItem { Kind = ToastKind.Info,    Title = title, Message = message }, DefaultLife);
+    public void Success(string title, string message = "") => Push(new ToastItem { Kind = ToastKind.Success, Title = title, Message = message }, DefaultLife);
+    public void Warning(string title, string message = "") => Push(new ToastItem { Kind = ToastKind.Warning, Title = title, Message = message }, DefaultLife);
+    public void Error  (string title, string message = "") => Push(new ToastItem { Kind = ToastKind.Error,   Title = title, Message = message }, ErrorLife);
+
+    /// <summary>
+    /// Push a sticky toast with an action button. The toast does NOT auto-
+    /// dismiss — the user dismisses it explicitly via the X, or it removes
+    /// itself once <paramref name="action"/> has run. Use for things like
+    /// "Update available" where we don't want the user to miss the prompt.
+    /// </summary>
+    public ToastItem PushAction(ToastKind kind, string title, string message, string actionLabel, Action action)
+    {
+        var item = new ToastItem
+        {
+            Kind        = kind,
+            Title       = title,
+            Message     = message,
+            ActionLabel = actionLabel,
+            Action      = action,
+        };
+        Push(item, DefaultLife);
+        return item;
+    }
 
     public void Dismiss(ToastItem item)
     {
         RunOnUi(() => Items.Remove(item));
     }
 
-    private void Push(ToastKind kind, string title, string message, TimeSpan life)
+    private void Push(ToastItem item, TimeSpan life)
     {
-        var item = new ToastItem { Kind = kind, Title = title, Message = message };
         RunOnUi(() =>
         {
             Items.Add(item);
             // Cap visible toasts so a buggy loop can't flood the screen.
             while (Items.Count > 6) Items.RemoveAt(0);
+
+            // Sticky toasts (those with an action) wait for the user — no
+            // auto-dismiss timer. Otherwise auto-remove after `life`.
+            if (item.IsSticky) return;
 
             DispatcherTimer.RunOnce(() =>
             {

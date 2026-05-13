@@ -189,6 +189,64 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private ConnectionRow? _selected;
 
     /// <summary>
+    /// Candidate rows for the "Use settings from…" picker — every saved
+    /// connection except the one currently being edited (you can't seed
+    /// from yourself). Refreshed on every Selected change so picking a
+    /// different row updates the candidate list automatically.
+    /// </summary>
+    public ObservableCollection<ConnectionRow> ReferenceCandidates { get; } = new();
+
+    /// <summary>
+    /// Picker proxy: setting this clones every non-identity field from the
+    /// chosen row into <see cref="Selected"/>. Resets back to null so the
+    /// dropdown is ready for a second pick (or to seed a different row
+    /// later). Environment and Database stay untouched — those define the
+    /// row's identity and the user already typed them.
+    /// </summary>
+    [ObservableProperty] private ConnectionRow? _referenceSource;
+
+    partial void OnReferenceSourceChanged(ConnectionRow? value)
+    {
+        if (value is null || Selected is null || ReferenceEquals(value, Selected)) return;
+        CopyFieldsFromReference(Selected, value);
+        Selected.Validate();
+        _svc.Toasts.Success("Settings cloned", $"Filled from '{value.Environment} · {value.Database}'. Adjust as needed.");
+        // Reset to null so re-picking the same reference works.
+        ReferenceSource = null;
+    }
+
+    /// <summary>
+    /// Copy every non-identity field from <paramref name="src"/> to
+    /// <paramref name="dst"/>: auth mode, server, sql-db, username,
+    /// password, raw connection string, colour, display name. Identity
+    /// (Environment + Database) is the user's intent and is left alone —
+    /// otherwise picking a reference would just duplicate it.
+    /// </summary>
+    private static void CopyFieldsFromReference(ConnectionRow dst, ConnectionRow src)
+    {
+        dst.Auth                = src.Auth;
+        dst.Server              = src.Server;
+        dst.DatabaseName        = src.DatabaseName;
+        dst.Username            = src.Username;
+        dst.Password            = src.Password;
+        dst.RawConnectionString = src.RawConnectionString;
+        if (!string.IsNullOrWhiteSpace(src.Color))       dst.Color       = src.Color;
+        if (!string.IsNullOrWhiteSpace(src.DisplayName)) dst.DisplayName = src.DisplayName;
+    }
+
+    /// <summary>Refresh <see cref="ReferenceCandidates"/> — everything except <see cref="Selected"/>.</summary>
+    private void RefreshReferenceCandidates()
+    {
+        ReferenceCandidates.Clear();
+        foreach (var r in Rows)
+        {
+            if (ReferenceEquals(r, Selected)) continue;
+            if (string.IsNullOrWhiteSpace(r.Environment) && string.IsNullOrWhiteSpace(r.Database)) continue;
+            ReferenceCandidates.Add(r);
+        }
+    }
+
+    /// <summary>
     /// Drives the Connection details expander. Auto-flipped to true whenever
     /// a row is selected (via Add or by tapping a tree node) so the editor
     /// is never invisibly collapsed behind a selected row. User can still
@@ -200,6 +258,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         if (value is not null) IsConnectionEditorExpanded = true;
         MirrorSelectedToGroupNodes(value);
+        RefreshReferenceCandidates();
     }
 
     /// <summary>
@@ -447,6 +506,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         _themeInitializing = true;
         ThemePref = _svc.AppSettings.Theme;
         _themeInitializing = false;
+
+        // Keep the reference-candidate list in sync with the Rows collection
+        // so a freshly-added connection shows up as a clone source immediately.
+        Rows.CollectionChanged += (_, _) => RefreshReferenceCandidates();
 
         // Backup folder: seed the input with the live path and describe
         // the never-overwrite guarantee so the user understands what the
