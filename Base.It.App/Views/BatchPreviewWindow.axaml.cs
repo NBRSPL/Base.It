@@ -29,6 +29,7 @@ public partial class BatchPreviewWindow : Window
     {
         AvaloniaXamlLoader.Load(this);
         DataContextChanged += (_, _) => Bind();
+        Opened += (_, _) => Services.WindowSizing.ClampToWorkingArea(this);
         Opened += async (_, _) => { if (_vm is not null) await _vm.LoadAsync(); };
         DetachedFromVisualTree += (_, _) => Unbind();
 

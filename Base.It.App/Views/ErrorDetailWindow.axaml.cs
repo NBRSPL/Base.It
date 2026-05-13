@@ -18,6 +18,7 @@ public partial class ErrorDetailWindow : Window
     public ErrorDetailWindow()
     {
         AvaloniaXamlLoader.Load(this);
+        Opened += (_, _) => Services.WindowSizing.ClampToWorkingArea(this);
     }
 
     /// <summary>

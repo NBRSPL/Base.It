@@ -55,6 +55,17 @@ public partial class MainWindow : AppWindow
         Vm.NavigateToBatchRequested += () => SelectByTag("Batch");
         Vm.NavigateToTagRequested   += SelectByTag;
 
+        // VM asked to open a Batch in a NEW Window (Send Changes → "Open in new
+        // window" path). Each new BatchWindow owns its own BatchViewModel
+        // instance so the main tab's pending work stays untouched. Window is
+        // non-modal (Show, not ShowDialog) so the user can flip between the
+        // new window and the main app freely.
+        Vm.OpenBatchInNewWindowRequested += batchVm =>
+        {
+            var win = new BatchWindow { DataContext = batchVm };
+            win.Show(this);
+        };
+
         Closing += (_, _) =>
         {
             _ = Vm.Watch.ShutdownAsync();

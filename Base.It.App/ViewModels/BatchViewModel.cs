@@ -906,6 +906,23 @@ public sealed partial class BatchViewModel : ObservableObject
             _svc.Toasts.Warning(emptyMsg, $"Nothing in {scopeLabel} to run.");
             return;
         }
+
+        // Major-action gate: Execute mutates every ticked target. Confirm
+        // before running so a stray click doesn't push 30 procs to PROD.
+        // Spelled out in the message: rows × targets so the user sees the
+        // real blast radius before saying yes.
+        var targetCount = Targets.Count(t => t.IsChecked);
+        var rowsLabel    = work.Count   == 1 ? "row"    : "rows";
+        var targetsLabel = targetCount  == 1 ? "target" : "targets";
+        var scopeLine    = scopeLabel.StartsWith("filtered")
+            ? $"This will run {work.Count} filtered {rowsLabel} against {targetCount} {targetsLabel}."
+            : $"This will run {work.Count} selected {rowsLabel} against {targetCount} {targetsLabel}.";
+        var ok = await ConfirmDialog.AskAsync(
+            title:       "Execute on targets?",
+            message:     $"{scopeLine} Each existing object will be ALTERED; missing objects will be CREATED. Continue?",
+            primaryText: "Execute",
+            cancelText:  "Cancel");
+        if (!ok) { Status = "Execute cancelled."; return; }
         if (string.IsNullOrWhiteSpace(SourceEnv) || string.IsNullOrWhiteSpace(SourceDatabase))
         {
             Status = "Pick source environment and database.";

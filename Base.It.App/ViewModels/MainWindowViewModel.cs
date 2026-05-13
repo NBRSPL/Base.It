@@ -39,7 +39,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <summary>Raised when the dock wants Compare foreground + a new tab.</summary>
     public event Action? NavigateToCompareRequested;
 
-    /// <summary>Raised by the Watch pane's "Send Changed to Batch" action.</summary>
+    /// <summary>Raised by the Watch pane's "Send Changes to Batch" action.</summary>
     public event Action? NavigateToBatchRequested;
 
     /// <summary>Raised by the Home pane when a shortcut card is clicked.</summary>
@@ -103,16 +103,105 @@ public sealed partial class MainWindowViewModel : ObservableObject
             Query.Reload();
         };
 
-        Watch.SendToBatchRequested += (names, srcEnv, tgtEnv, db) =>
+        Watch.SendToBatchRequested += payload =>
         {
-            Batch.Items.Clear();
-            foreach (var n in names) Batch.Items.Add(new BatchItem(n));
-            Batch.SourceEnv = srcEnv;
-            Batch.Database  = db;
-            Batch.TargetEnv = tgtEnv;
-            Batch.Status    = $"Loaded {names.Count} object(s) from watch group.";
-            NavigateToBatchRequested?.Invoke();
+            _ = HandleSendToBatchAsync(payload);
         };
+    }
+
+    /// <summary>
+    /// Raised when "Send Changes to Batch" wants to open a freshly-populated
+    /// Batch in its OWN window so the user can preserve whatever state the
+    /// main Batch tab currently holds. MainWindow subscribes and instantiates
+    /// the actual <see cref="Views.BatchWindow"/>. Keeping Window creation out
+    /// of the VM avoids dragging Avalonia's Window type into the model layer.
+    /// </summary>
+    public event Action<BatchViewModel>? OpenBatchInNewWindowRequested;
+
+    /// <summary>
+    /// Decide what to do when Watch hands off a list to Batch:
+    ///   1. If the main Batch tab is empty (no pending items) → just populate
+    ///      it and navigate. No dialog, no friction.
+    ///   2. Otherwise → ask the user whether to Replace, open a new window,
+    ///      or Cancel. Default-focused button is Cancel so an accidental
+    ///      Enter doesn't blow away an in-progress batch.
+    /// </summary>
+    private async Task HandleSendToBatchAsync(SendToBatchPayload payload)
+    {
+        bool replaceMain;
+        if (Batch.Items.Count == 0)
+        {
+            // No existing state — fall straight through, no confusing prompt.
+            replaceMain = true;
+        }
+        else
+        {
+            var choice = await ChoiceDialog.AskAsync(
+                title:         "Batch already has rows",
+                message:       $"The main Batch tab currently has {Batch.Items.Count} row(s). " +
+                               $"Sending {payload.ObjectNames.Count} object(s) from Watch — what do you want to do?",
+                primaryText:   "Open in new window",
+                secondaryText: "Replace current",
+                cancelText:    "Cancel");
+            switch (choice)
+            {
+                case ChoiceDialogResult.Primary:
+                    // Build a fresh BatchViewModel + open it in its own window.
+                    // The main tab is left exactly as it was.
+                    var fresh = new BatchViewModel(Services);
+                    PopulateBatch(fresh, payload);
+                    OpenBatchInNewWindowRequested?.Invoke(fresh);
+                    return;
+                case ChoiceDialogResult.Secondary:
+                    replaceMain = true;
+                    break;
+                default:
+                    return; // Cancel — leave everything alone.
+            }
+        }
+
+        if (replaceMain)
+        {
+            // Navigate FIRST so Batch.Reload() runs cleanly, then layer the
+            // sent state on top — same reasoning as before.
+            NavigateToBatchRequested?.Invoke();
+            PopulateBatch(Batch, payload);
+        }
+    }
+
+    /// <summary>
+    /// Shared population helper — used for both "replace main tab" and
+    /// "open in new window". Mirrors the FULL watch-group configuration:
+    /// source endpoint, source database, AND every target route. Each
+    /// matching target chip in the destination Batch gets ticked so the
+    /// recipient is one Execute click away from running. Filters reset so
+    /// a stale "Success/Skipped" filter doesn't hide the freshly-sent
+    /// rows (their default Status is Pending).
+    /// </summary>
+    private static void PopulateBatch(BatchViewModel batch, SendToBatchPayload payload)
+    {
+        batch.Items.Clear();
+        foreach (var n in payload.ObjectNames) batch.Items.Add(new BatchItem(n));
+
+        batch.SourceEnv    = payload.SourceEnv;
+        batch.Database     = payload.SourceDatabase;
+
+        // Untick every existing target first, then re-tick exactly the
+        // ones the watch group was monitoring. Match by (env, database)
+        // case-insensitively so casing drift between Settings and Watch
+        // doesn't drop a target.
+        foreach (var t in batch.Targets) t.IsChecked = false;
+        foreach (var (env, db) in payload.Targets)
+        {
+            var pick = batch.Targets.FirstOrDefault(t =>
+                string.Equals(t.Environment, env, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.Database,    db,  StringComparison.OrdinalIgnoreCase));
+            if (pick is not null) pick.IsChecked = true;
+        }
+
+        batch.StatusFilter = "All";
+        batch.NameFilter   = "";
+        batch.Status       = $"Loaded {payload.ObjectNames.Count} object(s) from watch group, {payload.Targets.Count} target(s) ticked.";
     }
 
     /// <summary>

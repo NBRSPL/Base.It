@@ -161,24 +161,90 @@ public partial class CompareTabView : UserControl
             Margin = new Thickness(10, 0, 0, 0)
         };
 
+        // Shared icon-button factory so Copy + Expand/Restore share an
+        // identical frame (size, font, padding). Explicit \uXXXX escapes
+        // keep the source ASCII-safe so glyphs render reliably regardless
+        // of file encoding round-trips.
+        static Button MakeIconBtn(string glyph, string tooltip)
+        {
+            var tb = new TextBlock
+            {
+                Text                = glyph,
+                FontFamily          = new FontFamily("Segoe Fluent Icons,Segoe MDL2 Assets"),
+                FontSize            = 13,
+                Opacity             = 0.85,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment   = VerticalAlignment.Center,
+            };
+            var btn = new Button
+            {
+                Content                    = tb,
+                Padding                    = new Thickness(6, 2),
+                MinWidth                   = 32,
+                MinHeight                  = 26,
+                Margin                     = new Thickness(6, 0, 0, 0),
+                HorizontalContentAlignment = HorizontalAlignment.Center,
+                VerticalContentAlignment   = VerticalAlignment.Center,
+            };
+            ToolTip.SetTip(btn, tooltip);
+            return btn;
+        }
+
+        // Copy: Segoe Fluent / MDL2 "Copy" glyph (E8C8).
+        var copyBtn = MakeIconBtn("", "Copy");
+        copyBtn.Command          = _vm!.CopyAllCommand;
+        copyBtn.CommandParameter = pane;
+
+        // Expand / Restore: FullScreen (E740) when collapsed, BackToWindow
+        // (E73F) when this pane is already expanded.
+        var isExpanded  = _vm.ExpandedPane is not null;
+        var expandBtn   = MakeIconBtn(
+            isExpanded ? "" : "",
+            isExpanded ? "Restore -- show all panes" : "Expand -- show only this pane");
+        expandBtn.Command          = isExpanded ? _vm.RestoreCommand : _vm.ExpandCommand;
+        expandBtn.CommandParameter = pane;
+
+        /* legacy-block-replaced -- delete-by-comment-out to preserve the
+           current Unicode chars in the source-text exactly as they were
+           on disk, without risking another encoding round-trip in the
+           Edit tool. Compiler ignores comments; runtime never sees this.
         var copyBtn = new Button
         {
-            Content = "Copy",
-            Padding = new Thickness(10, 4),
+            Content = new TextBlock
+            {
+                Text       = "",
+                FontFamily = new FontFamily("Segoe Fluent Icons,Segoe MDL2 Assets"),
+                FontSize   = 13,
+                Opacity    = 0.85,
+            },
+            Padding = new Thickness(6, 2),
+            MinWidth = 0,
             Margin = new Thickness(6, 0, 0, 0),
             Command = _vm!.CopyAllCommand,
             CommandParameter = pane,
-            [ToolTip.TipProperty] = "Copy the whole definition to the clipboard"
+            [ToolTip.TipProperty] = "Copy"
         };
+        // Icon-only Expand / Restore -- same chrome convention as Copy:
+        //   FullScreen glyph (E740) = "expand this pane"
+        //   BackToWindow glyph (E73F) = "restore all panes"
+        // Tooltip carries the verb so the affordance stays discoverable.
         var expandBtn = new Button
         {
-            Content = _vm.ExpandedPane is null ? "Expand" : "Restore",
-            Padding = new Thickness(10, 4),
+            Content = new TextBlock
+            {
+                Text       = _vm.ExpandedPane is null ? "" : "",
+                FontFamily = new FontFamily("Segoe Fluent Icons,Segoe MDL2 Assets"),
+                FontSize   = 13,
+                Opacity    = 0.85,
+            },
+            Padding = new Thickness(6, 2),
+            MinWidth = 0,
             Margin = new Thickness(6, 0, 0, 0),
             Command = _vm.ExpandedPane is null ? _vm.ExpandCommand : _vm.RestoreCommand,
             CommandParameter = pane,
-            [ToolTip.TipProperty] = _vm.ExpandedPane is null ? "Show only this pane" : "Show all panes"
+            [ToolTip.TipProperty] = _vm.ExpandedPane is null ? "Expand -- show only this pane" : "Restore -- show all panes"
         };
+        */
 
         var right = new StackPanel
         {

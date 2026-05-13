@@ -10,6 +10,23 @@ using CommunityToolkit.Mvvm.Input;
 namespace Base.It.App.ViewModels;
 
 /// <summary>
+/// Payload for the Watch → Batch handoff. Captures the changed objects,
+/// the source endpoint, AND every target the watch group was monitoring
+/// — so the destination Batch instance can pre-tick every one of them
+/// rather than guessing at a single "primary" target.
+/// </summary>
+/// <param name="ObjectNames">Drift rows the user wants to push.</param>
+/// <param name="SourceEnv">Watch group's source environment.</param>
+/// <param name="SourceDatabase">Watch group's source database.</param>
+/// <param name="Targets">Every (env, database) target route the watch was scanning.</param>
+public sealed record SendToBatchPayload(
+    IReadOnlyList<string>                        ObjectNames,
+    string                                       SourceEnv,
+    string                                       SourceDatabase,
+    IReadOnlyList<(string Environment, string Database)> Targets);
+
+
+/// <summary>
 /// Per-target drift state kept on every <see cref="DriftRowVm"/>. One
 /// entry exists per target env+db the row has been reported against.
 /// The <see cref="SeenThisTick"/> flag lets the watcher prune rows that
@@ -30,7 +47,11 @@ public sealed class TargetDriftState
 /// The view binds text (env label) + a brush keyed off <see cref="Kind"/>
 /// via <see cref="DriftStatusBrushConverter"/>.
 /// </summary>
-public sealed record TargetDriftTag(string Label, string Kind);
+public sealed record TargetDriftTag(string Label, string Kind)
+{
+    /// <summary>Human-readable form of <see cref="Kind"/> for tooltips.</summary>
+    public string KindLabel => DriftKindLabel.For(Kind);
+}
 
 /// <summary>
 /// Row model for the live drift grid. Aggregates per-target drift states
@@ -65,7 +86,10 @@ public sealed partial class DriftRowVm : ObservableObject
     /// <summary>Rebuild the chip collection + aggregate status/message from the per-target dict.</summary>
     public void RebuildAggregate()
     {
-        // Chips: show non-InSync targets, coloured by kind.
+        // Chips: show non-InSync targets, coloured by kind. Label is the
+        // target environment name; the chip's tooltip carries the
+        // human-readable kind so a user can hover to confirm "missing in
+        // PROD" rather than parsing the enum.
         TargetTags.Clear();
         foreach (var kv in TargetStates)
         {
@@ -81,10 +105,34 @@ public sealed partial class DriftRowVm : ObservableObject
             winner = TargetStates.Values.FirstOrDefault(s => s.Kind == k);
             if (winner is not null) break;
         }
-        PrimaryStatus = winner?.Kind.ToString() ?? "";
+        // Human label rather than the raw enum name so users see "Missing
+        // in target" instead of "MissingInTarget".
+        PrimaryStatus = winner is null ? "" : DriftKindLabel.For(winner.Kind);
         Message       = TargetStates.Values.Select(s => s.Message)
                                            .FirstOrDefault(m => !string.IsNullOrWhiteSpace(m)) ?? "";
     }
+}
+
+/// <summary>
+/// Human-readable labels for <see cref="DriftKind"/> — used for status
+/// columns, chips, and tooltips so the UI never exposes the raw enum
+/// name (which reads as a programmer-ese identifier, not English).
+/// </summary>
+public static class DriftKindLabel
+{
+    public static string For(DriftKind kind) => kind switch
+    {
+        DriftKind.InSync           => "In sync",
+        DriftKind.Different        => "Different",
+        DriftKind.MissingInTarget  => "Missing in target",
+        DriftKind.MissingInSource  => "Missing in source",
+        DriftKind.Error            => "Error",
+        _                          => kind.ToString()
+    };
+
+    /// <summary>Accepts an enum-name string (e.g. "MissingInTarget") and humanises it.</summary>
+    public static string For(string raw)
+        => Enum.TryParse<DriftKind>(raw, ignoreCase: true, out var k) ? For(k) : raw;
 }
 
 /// <summary>
@@ -216,8 +264,15 @@ public sealed partial class WatchViewModel : ObservableObject
     /// <summary>Flat projection over every section's rows. Used by Stage / Send-to-Batch.</summary>
     public IEnumerable<DriftRowVm> LiveRows => Sections.SelectMany(s => s.Rows);
 
-    /// <summary>Raised when the user hits "Send Changed to Batch". MainWindow subscribes to navigate + populate the Batch tab.</summary>
-    public event Action<IReadOnlyList<string>, string, string, string>? SendToBatchRequested;
+    /// <summary>
+    /// Raised when the user hits "Send Changes to Batch". MainWindow
+    /// subscribes to navigate + populate the Batch tab. Payload carries
+    /// the changed object names, the source endpoint, the source
+    /// database, AND the full list of target endpoints from the watch
+    /// group so the Batch ticks every target the watch was monitoring
+    /// (not just the primary).
+    /// </summary>
+    public event Action<SendToBatchPayload>? SendToBatchRequested;
 
     /// <summary>Raised when a drift row's eye icon is clicked. The view subscribes to open the preview window.</summary>
     public event Action<BatchPreviewViewModel>? PreviewRequested;
@@ -453,13 +508,46 @@ public sealed partial class WatchViewModel : ObservableObject
     [RelayCommand]
     private void SendToBatch()
     {
-        if (Selected is null) { Status = "Select a watch group first."; return; }
-        var changed = LiveRows.Where(r => r.IsSyncable).Select(r => r.ObjectName).Distinct().ToList();
-        if (changed.Count == 0) { Status = "No syncable changes in the current view."; return; }
+        if (Selected is null)
+        {
+            Status = "Select a watch group first.";
+            _svc.Toasts.Warning("No watch group", "Pick a group on the left first.");
+            return;
+        }
+        // Send every drift row — including MissingInSource — and let the
+        // Batch pane decide direction. Without this, a row that exists in
+        // target but not source (because the user authored on what the
+        // watch group calls the "target") couldn't be moved over. The
+        // user can swap source/target in Batch and push the right way.
+        // Filtering to !IsAllInSync just guarantees we don't ship rows
+        // that are already in sync.
+        var changed = LiveRows
+            .Where(r => !r.IsAllInSync)
+            .Select(r => r.ObjectName)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var totalLive = LiveRows.Count();
+        if (changed.Count == 0)
+        {
+            Status = "No drift rows to send.";
+            _svc.Toasts.Warning("Nothing to send",
+                totalLive == 0
+                    ? "The watcher hasn't reported any rows yet. Start the group and wait for the first tick."
+                    : $"{totalLive} row(s) visible but every target is in sync.");
+            return;
+        }
         var g = Selected.Group;
-        // Primary target fed to Batch; Batch pane's own target-picker can add more.
-        var tgtEnv = g.PrimaryTarget?.Environment ?? g.SourceEnv;
-        SendToBatchRequested?.Invoke(changed, g.SourceEnv, tgtEnv, g.SourceDatabase);
+        // Send EVERY target route from the watch group, not just the
+        // primary — Batch ticks each matching target on receipt, so the
+        // recipient gets the full monitored configuration ready to run.
+        var targets = g.Targets
+            .Select(t => (Environment: t.Environment, Database: t.Database))
+            .ToList();
+        SendToBatchRequested?.Invoke(new SendToBatchPayload(
+            ObjectNames:    changed,
+            SourceEnv:      g.SourceEnv,
+            SourceDatabase: g.SourceDatabase,
+            Targets:        targets));
     }
 
     // ---- DACPAC stage commands ---------------------------------------------

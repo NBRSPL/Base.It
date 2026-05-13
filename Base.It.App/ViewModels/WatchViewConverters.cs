@@ -48,14 +48,20 @@ public sealed class DriftStatusBrushConverter : IValueConverter
     private static readonly IBrush Fallback        = new SolidColorBrush(Color.Parse("#AAAAAA"));
 
     public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-        => (value as string) switch
+        // Accepts both the raw enum-name form ("MissingInTarget") and the
+        // humanised label ("Missing in target") so we can pass either
+        // shape through this single converter from XAML.
+        => (value as string)?.ToLowerInvariant() switch
         {
-            "Different"       => Different,
-            "MissingInTarget" => MissingInTarget,
-            "MissingInSource" => MissingInSource,
-            "Error"           => Err,
-            "InSync"          => InSync,
-            _                 => Fallback
+            "different"             => Different,
+            "missingintarget"       => MissingInTarget,
+            "missing in target"     => MissingInTarget,
+            "missinginsource"       => MissingInSource,
+            "missing in source"     => MissingInSource,
+            "error"                 => Err,
+            "insync"                => InSync,
+            "in sync"               => InSync,
+            _                       => Fallback
         };
 
     public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
