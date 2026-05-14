@@ -72,9 +72,39 @@ public sealed partial class SyncViewModel : ObservableObject
     /// </summary>
     public ObservableCollection<TargetPickVm> FilteredTargets { get; } = new();
 
+    /// <summary>Endpoints minus every ticked target — what the SOURCE picker should show.</summary>
+    public ObservableCollection<EndpointPick> SourceCandidateEndpoints { get; } = new();
+
+    /// <summary>Endpoints minus the source and minus every ticked target — what the "Add target" picker shows.</summary>
+    public ObservableCollection<EndpointPick> TargetCandidateEndpoints { get; } = new();
+
+    /// <summary>Live mirror of every <see cref="TargetPickVm"/> with IsChecked=true. Drives the inline chip strip.</summary>
+    public ObservableCollection<TargetPickVm> CheckedTargets { get; } = new();
+
+    /// <summary>First N of <see cref="CheckedTargets"/> — rendered as chips inline in the toolbar.</summary>
+    public ObservableCollection<TargetPickVm> CheckedTargetsVisible { get; } = new();
+
+    /// <summary>Tail beyond the visible cap — surfaced via the "+N more" flyout.</summary>
+    public ObservableCollection<TargetPickVm> CheckedTargetsOverflow { get; } = new();
+
+    private const int VisibleTargetChipsMax = 3;
+
+    public int  CheckedTargetsOverflowCount => CheckedTargetsOverflow.Count;
+    public bool HasCheckedTargetsOverflow   => CheckedTargetsOverflow.Count > 0;
+
+    /// <summary>
+    /// Pick proxy bound to the "Add target" AutoCompleteBox. Setting it
+    /// ticks the matching <see cref="TargetPickVm"/> and resets to null
+    /// so the picker is ready for the next add.
+    /// </summary>
+    [ObservableProperty] private EndpointPick? _nextTargetEndpoint;
+
     /// <summary>Swap is meaningful only when there's exactly one ticked target to swap with.</summary>
     public bool CanSwap =>
         SelectedSourceEndpoint is not null && Targets.Count(t => t.IsChecked) == 1;
+
+    /// <summary>Swap hides entirely once the user picks more than one target.</summary>
+    public bool IsSwapVisible => Targets.Count(t => t.IsChecked) <= 1;
 
     public int TargetSelectedCount => Targets.Count(t => t.IsChecked);
     public int TargetTotalCount    => Targets.Count;
@@ -257,6 +287,7 @@ public sealed partial class SyncViewModel : ObservableObject
         // Detach the IsChecked listener before clearing so we don't leak.
         foreach (var t in Targets) t.PropertyChanged -= OnTargetPropertyChanged;
         Targets.Clear();
+        CheckedTargets.Clear();
 
         foreach (var cfg in EnvironmentListProvider.VisibleConnections(_svc))
         {
@@ -268,15 +299,109 @@ public sealed partial class SyncViewModel : ObservableObject
                 isChecked: previouslyChecked.Contains($"{cfg.Environment?.ToUpperInvariant()}|{cfg.Database?.ToUpperInvariant()}"));
             pick.PropertyChanged += OnTargetPropertyChanged;
             Targets.Add(pick);
+            if (pick.IsChecked) CheckedTargets.Add(pick);
         }
         RebuildFilteredTargets();
+        RebuildEndpointCandidates();
+        RebuildCheckedTargetSlices();
         NotifyTargetCounts();
     }
 
     private void OnTargetPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(TargetPickVm.IsChecked))
-            NotifyTargetCounts();
+        if (e.PropertyName != nameof(TargetPickVm.IsChecked)) return;
+        NotifyTargetCounts();
+
+        // Mirror IsChecked transitions into CheckedTargets so the view's
+        // tag strip stays in sync. Using add/remove (not Clear+rebuild)
+        // keeps the chip animations / focus stable when an item flips.
+        if (sender is TargetPickVm vm)
+        {
+            if (vm.IsChecked && !CheckedTargets.Contains(vm))
+                CheckedTargets.Add(vm);
+            else if (!vm.IsChecked)
+                CheckedTargets.Remove(vm);
+        }
+
+        // A ticked target should disappear from BOTH dropdowns; an
+        // unticked one should reappear in the target picker.
+        RebuildEndpointCandidates();
+        RebuildCheckedTargetSlices();
+    }
+
+    /// <summary>
+    /// Re-partition <see cref="CheckedTargets"/> into the visible /
+    /// overflow slices. Visible holds the first <see cref="VisibleTargetChipsMax"/>
+    /// items; the rest go into overflow and surface via a "+N more" pill.
+    /// </summary>
+    private void RebuildCheckedTargetSlices()
+    {
+        CheckedTargetsVisible.Clear();
+        CheckedTargetsOverflow.Clear();
+        var i = 0;
+        foreach (var t in CheckedTargets)
+        {
+            if (i < VisibleTargetChipsMax) CheckedTargetsVisible.Add(t);
+            else                           CheckedTargetsOverflow.Add(t);
+            i++;
+        }
+        OnPropertyChanged(nameof(CheckedTargetsOverflowCount));
+        OnPropertyChanged(nameof(HasCheckedTargetsOverflow));
+    }
+
+    /// <summary>
+    /// Recompute the source / target candidate lists. Deferred to the next
+    /// dispatcher tick so we don't synchronously clear+rebuild the
+    /// ItemsSource of an AutoCompleteBox that's mid-callback (which crashes).
+    /// </summary>
+    private void RebuildEndpointCandidates()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            RebuildEndpointCandidatesCore,
+            Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private void RebuildEndpointCandidatesCore()
+    {
+        bool MatchesSource(EndpointPick ep) =>
+            !string.IsNullOrWhiteSpace(SourceEnv) && !string.IsNullOrWhiteSpace(SourceDatabase) &&
+            string.Equals(ep.Environment, SourceEnv,      StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(ep.Database,    SourceDatabase, StringComparison.OrdinalIgnoreCase);
+
+        bool MatchesAnyTicked(EndpointPick ep) =>
+            CheckedTargets.Any(t =>
+                string.Equals(t.Environment, ep.Environment, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.Database,    ep.Database,    StringComparison.OrdinalIgnoreCase));
+
+        SourceCandidateEndpoints.Clear();
+        TargetCandidateEndpoints.Clear();
+        foreach (var ep in Endpoints)
+        {
+            if (!MatchesAnyTicked(ep))    SourceCandidateEndpoints.Add(ep);
+            if (!MatchesSource(ep) && !MatchesAnyTicked(ep))
+                                          TargetCandidateEndpoints.Add(ep);
+        }
+    }
+
+    /// <summary>
+    /// Adding a target via the "Add target" picker. Ticks the matching
+    /// target and resets the picker back to null.
+    /// </summary>
+    partial void OnNextTargetEndpointChanged(EndpointPick? value)
+    {
+        if (value is null) return;
+        var t = Targets.FirstOrDefault(t =>
+            string.Equals(t.Environment, value.Environment, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(t.Database,    value.Database,    StringComparison.OrdinalIgnoreCase));
+        if (t is not null && !t.IsChecked) t.IsChecked = true;
+        NextTargetEndpoint = null;
+    }
+
+    /// <summary>Remove a single target from the selected set. Wired from the × on each chip in the view.</summary>
+    public void UncheckTarget(TargetPickVm t)
+    {
+        if (t is null) return;
+        t.IsChecked = false;
     }
 
     partial void OnTargetFilterChanged(string value) => RebuildFilteredTargets();
@@ -298,6 +423,7 @@ public sealed partial class SyncViewModel : ObservableObject
     private void NotifyTargetCounts()
     {
         OnPropertyChanged(nameof(CanSwap));
+        OnPropertyChanged(nameof(IsSwapVisible));
         OnPropertyChanged(nameof(TargetSelectedCount));
         OnPropertyChanged(nameof(TargetTotalCount));
     }

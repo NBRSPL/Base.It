@@ -345,8 +345,17 @@ WHERE tr.name = @name
 
     /// <summary>
     /// Lightweight column-only CREATE TABLE. Used by the default fetch
-    /// path (drift detection / Compare / Query fetch). Matches the
-    /// pre-DACPAC output shape so existing hashes stay valid.
+    /// path (drift detection / Compare / Query fetch).
+    ///
+    /// Columns are emitted in case-insensitive alphabetical order — NOT
+    /// the underlying sys.columns.column_id (storage) order — so that two
+    /// tables with the same columns in different storage positions hash
+    /// equal and don't get flagged as Different in Watch / Compare.
+    /// Logical schema equality is "same columns + same types + same
+    /// nullability", and physical column position isn't a schema fact.
+    /// (The DACPAC export path preserves column_id order because exported
+    /// SQL files have conventional declaration order; that's a different
+    /// concern.)
     /// </summary>
     private static async Task<string> ScriptTableSimpleAsync(
         string connectionString, ObjectIdentifier id, CancellationToken ct)
@@ -357,7 +366,7 @@ WHERE tr.name = @name
         cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
         cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
 
-        var columns = new List<string>();
+        var columns = new List<(string Name, string Line)>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
@@ -375,10 +384,13 @@ WHERE tr.name = @name
                 "decimal" or "numeric" => $"{typeName}({precision},{scale})",
                 _                      => typeName
             };
-            columns.Add($"    [{name}] {typeSpec} {(isNullable ? "NULL" : "NOT NULL")}");
+            columns.Add((name, $"    [{name}] {typeSpec} {(isNullable ? "NULL" : "NOT NULL")}"));
         }
         if (columns.Count == 0) return string.Empty;
-        return $"CREATE TABLE [{id.Schema}].[{id.Name}] (\n{string.Join(",\n", columns)}\n);\n";
+        var sortedLines = columns
+            .OrderBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(c => c.Line);
+        return $"CREATE TABLE [{id.Schema}].[{id.Name}] (\n{string.Join(",\n", sortedLines)}\n);\n";
     }
 
     /// <summary>

@@ -58,6 +58,32 @@ public sealed partial class ScriptsViewModel : ObservableObject
     public ObservableCollection<TargetPickVm>    Targets         { get; } = new();
     public ObservableCollection<TargetPickVm>    FilteredTargets { get; } = new();
 
+    /// <summary>Flat endpoint list (every visible connection) for the target picker.</summary>
+    public ObservableCollection<EndpointPick> Endpoints { get; } = new();
+
+    /// <summary>Endpoints minus every ticked target — what the "Add target" picker shows.</summary>
+    public ObservableCollection<EndpointPick> TargetCandidateEndpoints { get; } = new();
+
+    /// <summary>Live mirror of every ticked <see cref="TargetPickVm"/>. Drives the inline chip strip.</summary>
+    public ObservableCollection<TargetPickVm> CheckedTargets { get; } = new();
+
+    /// <summary>First N ticked targets — rendered inline.</summary>
+    public ObservableCollection<TargetPickVm> CheckedTargetsVisible { get; } = new();
+
+    /// <summary>Tail beyond the visible cap — shown in the "+N more" flyout.</summary>
+    public ObservableCollection<TargetPickVm> CheckedTargetsOverflow { get; } = new();
+
+    private const int VisibleTargetChipsMax = 3;
+
+    public int  CheckedTargetsOverflowCount => CheckedTargetsOverflow.Count;
+    public bool HasCheckedTargetsOverflow   => CheckedTargetsOverflow.Count > 0;
+
+    /// <summary>
+    /// Pick proxy bound to the "Add target" AutoCompleteBox. Setting it
+    /// ticks the matching target and resets back to null.
+    /// </summary>
+    [ObservableProperty] private EndpointPick? _nextTargetEndpoint;
+
     public int TargetSelectedCount => Targets.Count(t => t.IsChecked);
 
     public ScriptsViewModel(AppServices svc)
@@ -73,6 +99,11 @@ public sealed partial class ScriptsViewModel : ObservableObject
         var previouslyChecked = Targets.Where(t => t.IsChecked).Select(t => t.Key).ToHashSet();
         foreach (var t in Targets) t.PropertyChanged -= OnTargetPropertyChanged;
         Targets.Clear();
+        CheckedTargets.Clear();
+
+        Endpoints.Clear();
+        foreach (var ep in EnvironmentListProvider.Endpoints(_svc)) Endpoints.Add(ep);
+
         foreach (var cfg in EnvironmentListProvider.VisibleConnections(_svc))
         {
             var key = $"{cfg.Environment?.ToUpperInvariant()}|{cfg.Database?.ToUpperInvariant()}";
@@ -80,15 +111,84 @@ public sealed partial class ScriptsViewModel : ObservableObject
                 isChecked: previouslyChecked.Contains(key));
             pick.PropertyChanged += OnTargetPropertyChanged;
             Targets.Add(pick);
+            if (pick.IsChecked) CheckedTargets.Add(pick);
         }
         RebuildFilteredTargets();
+        RebuildEndpointCandidates();
+        RebuildCheckedTargetSlices();
         OnPropertyChanged(nameof(TargetSelectedCount));
     }
 
     private void OnTargetPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName == nameof(TargetPickVm.IsChecked))
-            OnPropertyChanged(nameof(TargetSelectedCount));
+        if (e.PropertyName != nameof(TargetPickVm.IsChecked)) return;
+        OnPropertyChanged(nameof(TargetSelectedCount));
+
+        if (sender is TargetPickVm vm)
+        {
+            if (vm.IsChecked && !CheckedTargets.Contains(vm))
+                CheckedTargets.Add(vm);
+            else if (!vm.IsChecked)
+                CheckedTargets.Remove(vm);
+        }
+
+        RebuildEndpointCandidates();
+        RebuildCheckedTargetSlices();
+    }
+
+    private void RebuildCheckedTargetSlices()
+    {
+        CheckedTargetsVisible.Clear();
+        CheckedTargetsOverflow.Clear();
+        var i = 0;
+        foreach (var t in CheckedTargets)
+        {
+            if (i < VisibleTargetChipsMax) CheckedTargetsVisible.Add(t);
+            else                           CheckedTargetsOverflow.Add(t);
+            i++;
+        }
+        OnPropertyChanged(nameof(CheckedTargetsOverflowCount));
+        OnPropertyChanged(nameof(HasCheckedTargetsOverflow));
+    }
+
+    private void RebuildEndpointCandidates()
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(
+            RebuildEndpointCandidatesCore,
+            Avalonia.Threading.DispatcherPriority.Background);
+    }
+
+    private void RebuildEndpointCandidatesCore()
+    {
+        bool MatchesAnyTicked(EndpointPick ep) =>
+            CheckedTargets.Any(t =>
+                string.Equals(t.Environment, ep.Environment, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(t.Database,    ep.Database,    StringComparison.OrdinalIgnoreCase));
+
+        TargetCandidateEndpoints.Clear();
+        foreach (var ep in Endpoints)
+            if (!MatchesAnyTicked(ep)) TargetCandidateEndpoints.Add(ep);
+    }
+
+    /// <summary>
+    /// Adding a target via the "Add target" picker. Ticks the matching
+    /// target and resets the picker.
+    /// </summary>
+    partial void OnNextTargetEndpointChanged(EndpointPick? value)
+    {
+        if (value is null) return;
+        var t = Targets.FirstOrDefault(t =>
+            string.Equals(t.Environment, value.Environment, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(t.Database,    value.Database,    StringComparison.OrdinalIgnoreCase));
+        if (t is not null && !t.IsChecked) t.IsChecked = true;
+        NextTargetEndpoint = null;
+    }
+
+    /// <summary>Remove a single target — wired from the × on each chip.</summary>
+    public void UncheckTarget(TargetPickVm t)
+    {
+        if (t is null) return;
+        t.IsChecked = false;
     }
 
     partial void OnTargetFilterChanged(string value) => RebuildFilteredTargets();

@@ -15,67 +15,150 @@
         <Grid RowDefinitions="Auto,*,Auto">
 
             <!-- ─────────── Row 0: targets + actions ─────────── -->
+            <!-- Same target-picker shape as Batch: "To" pill with searchable
+                 dropdown + inline chip strip + clear / +N overflow. -->
             <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
-                <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
 
-                    <!-- Targets popover (same pattern as Batch) -->
-                    <Button Grid.Column="0" Padding="10,4" MinHeight="30"
-                            ToolTip.Tip="Targets — pick one or more endpoints to run the scripts against.">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock Text="Targets" FontSize="12"/>
-                            <Border Classes="countPill">
-                                <TextBlock Text="{Binding TargetSelectedCount}"/>
-                            </Border>
-                            <TextBlock Text="▾" FontSize="11" Opacity="0.6"/>
-                        </StackPanel>
-                        <Button.Flyout>
-                            <Flyout Placement="Bottom">
-                                <StackPanel Spacing="8" MinWidth="360">
-                                    <Grid ColumnDefinitions="*,Auto,Auto">
-                                        <TextBox Grid.Column="0"
-                                                 Text="{Binding TargetFilter, Mode=TwoWay}"
-                                                 Watermark="Filter"/>
-                                        <Button  Grid.Column="1" Margin="6,0,0,0"
-                                                 Content="Select all visible"
-                                                 Command="{Binding SelectAllVisibleTargetsCommand}"/>
-                                        <Button  Grid.Column="2" Margin="4,0,0,0"
-                                                 Content="Clear"
-                                                 Command="{Binding ClearTargetsCommand}"/>
+                    <Border Grid.Column="0"
+                            Background="{DynamicResource App.ElevatedBgBrush}"
+                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                            BorderThickness="1" CornerRadius="6"
+                            Padding="8,4" ClipToBounds="True">
+                    <DockPanel LastChildFill="True" VerticalAlignment="Center">
+                        <TextBlock DockPanel.Dock="Left"
+                                   Text="To" FontSize="11" FontWeight="SemiBold"
+                                   Opacity="0.85" VerticalAlignment="Center"
+                                   Margin="0,0,6,0"
+                                   Foreground="{DynamicResource App.AccentBrush}"/>
+                        <Border DockPanel.Dock="Left" Classes="dropdownShell" Margin="0,0,6,0">
+                        <Grid ColumnDefinitions="*,Auto">
+                        <AutoCompleteBox Grid.Column="0" x:Name="TargetAddBox" MinWidth="180"
+                                         MinimumPrefixLength="0" FilterMode="Contains"
+                                         BorderThickness="0" Background="Transparent"
+                                         ItemsSource="{Binding TargetCandidateEndpoints}"
+                                         SelectedItem="{Binding NextTargetEndpoint, Mode=TwoWay}"
+                                         GotFocus="OnEndpointPickerGotFocus"
+                                         SelectionChanged="OnTargetAddSelectionChanged"
+                                         Watermark="Add target">
+                            <AutoCompleteBox.ItemTemplate>
+                                <DataTemplate DataType="vm:EndpointPick">
+                                    <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                                        <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
+                                                 Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                 Margin="0,0,8,0"/>
+                                        <StackPanel Grid.Column="1">
+                                            <TextBlock Text="{Binding Label}" FontSize="12"/>
+                                            <TextBlock Text="{Binding SubLabel}"
+                                                       FontSize="10" Opacity="0.55"
+                                                       IsVisible="{Binding ShowSubLabel}"/>
+                                        </StackPanel>
                                     </Grid>
-                                    <ScrollViewer MaxHeight="320"
-                                                  HorizontalScrollBarVisibility="Disabled"
-                                                  VerticalScrollBarVisibility="Auto">
-                                        <ItemsControl ItemsSource="{Binding FilteredTargets}">
-                                            <ItemsControl.ItemsPanel>
-                                                <ItemsPanelTemplate>
-                                                    <WrapPanel Orientation="Horizontal"/>
-                                                </ItemsPanelTemplate>
-                                            </ItemsControl.ItemsPanel>
-                                            <ItemsControl.ItemTemplate>
-                                                <DataTemplate DataType="vm:TargetPickVm">
-                                                    <ToggleButton Classes="chip"
-                                                                  Content="{Binding Label}"
-                                                                  IsChecked="{Binding IsChecked, Mode=TwoWay}"/>
-                                                </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
-                                    </ScrollViewer>
-                                </StackPanel>
-                            </Flyout>
-                        </Button.Flyout>
-                    </Button>
+                                </DataTemplate>
+                            </AutoCompleteBox.ItemTemplate>
+                        </AutoCompleteBox>
+                        <Button Grid.Column="1"
+                                Padding="8,0" MinWidth="0" MinHeight="0"
+                                Background="Transparent" BorderThickness="0"
+                                VerticalAlignment="Stretch"
+                                Click="OnTargetChevronClick"
+                                ToolTip.Tip="Show all targets">
+                            <TextBlock Text="▾" FontSize="11" Opacity="0.6"
+                                       VerticalAlignment="Center"/>
+                        </Button>
+                        </Grid>
+                        </Border>
+                        <Button DockPanel.Dock="Left"
+                                Padding="6,2" MinWidth="0" MinHeight="22"
+                                Margin="0,0,6,0"
+                                IsVisible="{Binding TargetSelectedCount}"
+                                Command="{Binding ClearTargetsCommand}"
+                                ToolTip.Tip="Clear all targets">
+                            <TextBlock Text="&#xE894;"
+                                       FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                       FontSize="11" Opacity="0.85"/>
+                        </Button>
+                        <Button DockPanel.Dock="Right"
+                                Padding="6,2" MinHeight="22" FontSize="11"
+                                Margin="6,0,0,0"
+                                IsVisible="{Binding HasCheckedTargetsOverflow}"
+                                ToolTip.Tip="More selected targets — click to see / remove">
+                            <TextBlock Text="{Binding CheckedTargetsOverflowCount, StringFormat='+{0} more'}"
+                                       FontSize="10" FontWeight="SemiBold"/>
+                            <Button.Flyout>
+                                <Flyout Placement="Bottom">
+                                    <ItemsControl ItemsSource="{Binding CheckedTargetsOverflow}" MinWidth="220">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel Orientation="Horizontal"/>
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="vm:TargetPickVm">
+                                                <Border Classes="badge" Margin="2"
+                                                        Background="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}">
+                                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                                        <TextBlock Text="{Binding Label}"
+                                                                   FontSize="11" FontWeight="SemiBold"
+                                                                   Foreground="White"/>
+                                                        <Button Click="OnRemoveTargetClick" Tag="{Binding}"
+                                                                Padding="3,0" MinWidth="0" MinHeight="0"
+                                                                Background="Transparent" BorderThickness="0">
+                                                            <TextBlock Text="✕" FontSize="10"
+                                                                       Foreground="White" Opacity="0.85"/>
+                                                        </Button>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </Flyout>
+                            </Button.Flyout>
+                        </Button>
+                        <ScrollViewer HorizontalScrollBarVisibility="Hidden"
+                                      VerticalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding CheckedTargetsVisible}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="4"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate DataType="vm:TargetPickVm">
+                                        <Border Classes="badge"
+                                                Background="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                VerticalAlignment="Center"
+                                                Padding="6,2"
+                                                ToolTip.Tip="{Binding Label}">
+                                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding Label}"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           Foreground="White"/>
+                                                <Button Click="OnRemoveTargetClick" Tag="{Binding}"
+                                                        Padding="3,0" MinWidth="0" MinHeight="0"
+                                                        Background="Transparent" BorderThickness="0"
+                                                        ToolTip.Tip="Remove this target">
+                                                    <TextBlock Text="✕" FontSize="10"
+                                                               Foreground="White" Opacity="0.85"/>
+                                                </Button>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </DockPanel>
+                    </Border>
 
-                    <!-- spacer @ col 1 -->
-
-                    <Button Grid.Column="2" MinWidth="120" Content="+ Add files…"
+                    <Button Grid.Column="1" Margin="6,0,0,0" MinWidth="120" Content="+ Add files…"
                             Click="OnAddFilesClick"
                             ToolTip.Tip="Pick one or more .sql files."/>
-                    <Button Grid.Column="3" Margin="4,0,0,0" MinWidth="120" Content="+ Add folder…"
+                    <Button Grid.Column="2" Margin="4,0,0,0" MinWidth="120" Content="+ Add folder…"
                             Click="OnAddFolderClick"
                             ToolTip.Tip="Pick a folder — every .sql below it is added (recursive)."/>
-                    <Button Grid.Column="4" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
+                    <Button Grid.Column="3" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
                             Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
-                    <Button Grid.Column="5" Margin="4,0,0,0" MinWidth="64" Content="Clear"
+                    <Button Grid.Column="4" Margin="4,0,0,0" MinWidth="64" Content="Clear"
                             Command="{Binding ClearCommand}"/>
                 </Grid>
             </Border>
