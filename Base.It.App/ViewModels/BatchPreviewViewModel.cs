@@ -42,7 +42,16 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
     private readonly string? _sourceOverrideLabel;
     private readonly string? _sourceOverrideColor;
 
-    public string Title { get; }
+    /// <summary>
+    /// True when every pane is already populated literally (e.g. via
+    /// <see cref="ForLiteralPair"/> from a snapshot diff) — no network
+    /// fetch is needed and <see cref="LoadAsync"/> bails out at the top
+    /// so it doesn't wipe the pre-built panes and replace them with
+    /// "not found in the endpoint" errors.
+    /// </summary>
+    private bool _skipFetchOnLoad;
+
+    public string Title { get; set; }
     public ObservableCollection<EnvPane> Panes { get; } = new();
 
     [ObservableProperty] private string _status = "Fetching definitions…";
@@ -100,6 +109,43 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Builds a no-fetch preview from two already-known SQL strings —
+    /// used by the snapshot Compare grid's per-row eye button. The
+    /// stored snapshots already contain the full DACPAC-shaped SQL, so
+    /// there's nothing to fetch; we just wrap the strings as panes and
+    /// run them through <see cref="LineAligner"/> so the same red-line
+    /// diff rendering applies.
+    /// </summary>
+    public static BatchPreviewViewModel ForLiteralPair(
+        AppServices svc,
+        string title,
+        string leftLabel,  string? leftColor,  string leftDefinition,
+        string rightLabel, string? rightColor, string rightDefinition)
+    {
+        var vm = new BatchPreviewViewModel(svc, title, Array.Empty<PreviewEndpoint>());
+        vm.Title = title;
+        // Critical: tell LoadAsync to bail. BatchPreviewWindow auto-fires
+        // LoadAsync on Opened, and without this flag it would wipe these
+        // pre-built panes and replace them with "not found in the
+        // endpoint" errors (we have no endpoints to query in this mode).
+        vm._skipFetchOnLoad = true;
+
+        // Pre-populate the panes immediately — no LoadAsync needed.
+        // Each side aligns against the other so AlignedPaneLine.State
+        // ends up populated for the diff highlighter.
+        var leftLines  = Base.It.Core.Diff.LineAligner.Align(leftDefinition,  new[] { rightDefinition });
+        var rightLines = Base.It.Core.Diff.LineAligner.Align(rightDefinition, new[] { leftDefinition  });
+        vm.Panes.Add(new EnvPane(leftLabel,  leftColor,  leftDefinition,  leftLines));
+        vm.Panes.Add(new EnvPane(rightLabel, rightColor, rightDefinition, rightLines));
+
+        var diffs = vm.Panes.Sum(p => p.Lines.Count(l => l.State == Base.It.Core.Diff.LineState.Different));
+        vm.Status = diffs == 0
+            ? "Both sides match — no line-level differences."
+            : $"{diffs} differing line(s).";
+        return vm;
+    }
+
+    /// <summary>
     /// Pull every endpoint's definition, then build aligned panes against
     /// each peer. Mirrors <see cref="CompareTabViewModel.LoadAsync"/>'s
     /// flow so the same diff highlights apply: a line is "Different"
@@ -107,6 +153,11 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
     /// </summary>
     internal async Task LoadAsync()
     {
+        // No-fetch mode (e.g. snapshot diff via ForLiteralPair): panes are
+        // already populated, status is already set. Calling out to
+        // endpoints would just blow them away and surface "not found".
+        if (_skipFetchOnLoad) return;
+
         IsBusy = true;
         Status = "Fetching definitions…";
         Panes.Clear();

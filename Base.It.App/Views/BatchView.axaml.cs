@@ -7,7 +7,11 @@ using Base.It.App.ViewModels;
 
 namespace Base.It.App.Views;
 
-public partial class BatchView : UserControl, ISupportsFind
+// Intentionally does NOT implement ISupportsFind: Ctrl+F used to set
+// the items-grid name filter, which surprised users who expected the
+// OS-standard "find in page" behaviour. The grid filter has its own
+// visible textbox; Ctrl+F stays separate.
+public partial class BatchView : UserControl
 {
     public BatchView()
     {
@@ -68,12 +72,29 @@ public partial class BatchView : UserControl, ISupportsFind
 
     private void WireSourceFilter()
     {
-        // Same filter shape on both the source picker and the "Add target"
-        // picker — keeps the UX consistent across the two halves of the row.
+        // Source side now lists BatchSourceItem (live + snapshot mixed);
+        // target side still lists plain EndpointPick.
         var src = this.FindControl<AutoCompleteBox>("SourceBox");
         var tgt = this.FindControl<AutoCompleteBox>("TargetAddBox");
-        if (src is not null) src.ItemFilter = EndpointFilter;
+        if (src is not null) src.ItemFilter = SourceItemFilter;
         if (tgt is not null) tgt.ItemFilter = EndpointFilter;
+    }
+
+    /// <summary>
+    /// Filter for the source picker. Matches the combined label (which
+    /// includes "@ snapshot …" for snapshot rows) plus the underlying
+    /// env / db so users can find either kind by typing any fragment.
+    /// </summary>
+    private static bool SourceItemFilter(string? search, object? item)
+    {
+        if (item is not BatchSourceItem s) return false;
+        if (string.IsNullOrEmpty(search)) return true;
+        var q = search!.Trim();
+        return s.Label.Contains(q, System.StringComparison.OrdinalIgnoreCase)
+            || s.SubLabel.Contains(q, System.StringComparison.OrdinalIgnoreCase)
+            || s.Endpoint.Environment.Contains(q, System.StringComparison.OrdinalIgnoreCase)
+            || s.Endpoint.Database.Contains(q, System.StringComparison.OrdinalIgnoreCase)
+            || (s.IsSnapshot && "snapshot".Contains(q, System.StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool EndpointFilter(string? search, object? item)
@@ -85,16 +106,6 @@ public partial class BatchView : UserControl, ISupportsFind
             || p.Environment.Contains(s, System.StringComparison.OrdinalIgnoreCase)
             || p.Database.Contains(s, System.StringComparison.OrdinalIgnoreCase);
     }
-
-    /// <summary>ISupportsFind: maps the global find overlay to the items-grid name filter.</summary>
-    public void ApplyFind(string? text)
-    {
-        if (DataContext is not BatchViewModel vm) return;
-        vm.NameFilter = text ?? string.Empty;
-    }
-
-    public string CurrentFindText
-        => (DataContext as BatchViewModel)?.NameFilter ?? string.Empty;
 
     /// <summary>
     /// QuickAdd box (the editable first row above the items grid). Enter
@@ -209,7 +220,11 @@ public partial class BatchView : UserControl, ISupportsFind
             title:    item.Name,
             subtitle: $"Failed — row #{item.Index}",
             body:     item.Message);
-        if (owner is not null) win.ShowDialog(owner);
+        // Non-modal so it doesn't freeze the Batch window — the user
+        // typically wants to copy the error AND keep working on other
+        // rows. Show(owner) keeps the always-on-top-of-owner relationship
+        // without the modal block.
+        if (owner is not null) win.Show(owner);
         else                   win.Show();
     }
 
@@ -218,19 +233,29 @@ public partial class BatchView : UserControl, ISupportsFind
     /// every ticked target's CREATE definition lazily, one tab per
     /// endpoint. Pure read; nothing is executed against any target.
     /// </summary>
-    private void OnPreviewClick(object? sender, RoutedEventArgs e)
+    private async void OnPreviewClick(object? sender, RoutedEventArgs e)
     {
         if (sender is not Button btn) return;
         if (btn.Tag is not BatchItem item) return;
         if (DataContext is not BatchViewModel vm) return;
         e.Handled = true;
 
-        var preview = vm.BuildPreview(item);
+        // Async now: snapshot-source mode reads the literal SQL from the
+        // schema store before opening the window — without that, a
+        // snapshot source would try a (doomed) live fetch and the preview
+        // would surface "not found in the endpoint".
+        var preview = await vm.BuildPreviewAsync(item);
         if (preview is null) return;
 
         var owner = TopLevel.GetTopLevel(this) as Window;
         var win = new BatchPreviewWindow { DataContext = preview };
-        if (owner is not null) win.ShowDialog(owner);
+        // Non-modal so multiple previews can be open at once across
+        // multiple Batch windows. Show(owner) preserves the
+        // owner relationship (preview floats with its parent, follows it
+        // on minimize/restore) WITHOUT blocking the parent — minimizing
+        // or even leaving the preview open no longer freezes the Batch
+        // window underneath it.
+        if (owner is not null) win.Show(owner);
         else                   win.Show();
     }
 

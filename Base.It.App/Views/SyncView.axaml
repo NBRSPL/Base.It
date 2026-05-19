@@ -1,8 +1,10 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:v="using:Base.It.App.Views"
              xmlns:vm="using:Base.It.App.ViewModels"
              xmlns:cfg="using:Base.It.Core.Config"
              x:Class="Base.It.App.Views.SyncView"
+             x:Name="SyncRoot"
              x:DataType="vm:SyncViewModel">
 
     <!-- Single-object sync. Mirrors Batch's compact layout so muscle memory
@@ -73,25 +75,47 @@
                                    Foreground="{DynamicResource App.AccentBrush}"/>
                         <Border Classes="dropdownShell">
                         <Grid ColumnDefinitions="*,Auto">
-                        <AutoCompleteBox Grid.Column="0" x:Name="SourceBox" MinWidth="200"
+                        <!-- Combined live + snapshot source picker — mirrors
+                             Batch's XAML exactly (same MinWidth, no
+                             ValueMemberBinding, identical ItemTemplate
+                             including the "snapshot" pill) so the two
+                             screens behave the same. Custom ItemFilter
+                             delegate is wired in code-behind
+                             (SourceItemFilter, copied from BatchView) to
+                             match on Label / SubLabel / env / db /
+                             "snapshot". Without that filter the dropdown
+                             showed NOTHING because the previous
+                             EndpointPick-only filter rejected every
+                             BatchSourceItem in the candidates list. -->
+                        <AutoCompleteBox Grid.Column="0" x:Name="SourceBox" MinWidth="220"
                                          MinimumPrefixLength="0" FilterMode="Contains"
                                          BorderThickness="0" Background="Transparent"
-                                         ItemsSource="{Binding SourceCandidateEndpoints}"
-                                         SelectedItem="{Binding SelectedSourceEndpoint, Mode=TwoWay}"
+                                         ItemsSource="{Binding SourceCandidates}"
+                                         SelectedItem="{Binding SelectedSource, Mode=TwoWay}"
                                          GotFocus="OnEndpointPickerGotFocus"
-                                         Watermark="Source">
+                                         Watermark="Source (live or snapshot)">
                             <AutoCompleteBox.ItemTemplate>
-                                <DataTemplate DataType="vm:EndpointPick">
-                                    <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                                <DataTemplate DataType="vm:BatchSourceItem">
+                                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2">
                                         <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
                                                  Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
                                                  Margin="0,0,8,0"/>
                                         <StackPanel Grid.Column="1">
                                             <TextBlock Text="{Binding Label}" FontSize="12"/>
                                             <TextBlock Text="{Binding SubLabel}"
-                                                       FontSize="10" Opacity="0.55"
-                                                       IsVisible="{Binding ShowSubLabel}"/>
+                                                       FontSize="10" Opacity="0.55"/>
                                         </StackPanel>
+                                        <!-- "snapshot" pill so snapshot rows
+                                             are easy to spot in the dropdown.
+                                             Hidden for live endpoints. -->
+                                        <Border Grid.Column="2"
+                                                Background="{DynamicResource App.AccentBrush}"
+                                                CornerRadius="3" Padding="4,1" Margin="6,0,0,0"
+                                                IsVisible="{Binding IsSnapshot}"
+                                                VerticalAlignment="Center">
+                                            <TextBlock Text="snapshot" FontSize="9" FontWeight="SemiBold"
+                                                       Foreground="White"/>
+                                        </Border>
                                     </Grid>
                                 </DataTemplate>
                             </AutoCompleteBox.ItemTemplate>
@@ -287,10 +311,10 @@
                               IsVisible="{Binding DacpacConfigured}"
                               ToolTip.Tip="Write the source definition to the configured DACPAC / SSDT folder after a successful sync. Configured in Settings → DACPAC."/>
 
-                    <Button Grid.Column="2" MinWidth="84" Content="Preview"
-                            Command="{Binding PreviewCommand}"
+                    <Button Grid.Column="2" MinWidth="84" Content="Compare"
+                            Command="{Binding CompareCommand}"
                             IsEnabled="{Binding !IsBusy}"
-                            ToolTip.Tip="Fetch source + every ticked target's CREATE definition for the typed object. Pure read; nothing is executed."/>
+                            ToolTip.Tip="Fetch source + every ticked target's CREATE definition for the typed object and render the diff side-by-side below. Pure read; nothing is executed."/>
                     <Button Grid.Column="3" Margin="4,0,0,0" MinWidth="72" Content="Backup"
                             Command="{Binding BackupCommand}" IsEnabled="{Binding !IsBusy}"
                             ToolTip.Tip="Capture source + every ticked target without altering anything."/>
@@ -299,31 +323,49 @@
                 </Grid>
             </Border>
 
-            <!-- ──────────────── Row 2: last-run info card (the main view) ──────────────── -->
-            <Border Grid.Row="2" Classes="card" VerticalAlignment="Top">
-                <StackPanel Spacing="10">
-                    <StackPanel>
-                        <TextBlock Classes="sectionTitle" Text="Last run"/>
-                        <StackPanel IsVisible="{Binding LastZipPath, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                            <TextBlock Text="Pair zip" Opacity="0.55" FontSize="11" Margin="0,0,0,3"/>
-                            <SelectableTextBlock Text="{Binding LastZipPath}" Classes="mono"/>
+            <!-- ──────────────── Row 2: main view ─────────────────────────────
+                 Two overlaid states, IsVisible-driven so only one is in the
+                 layout at a time:
+                   • Inline comparison panes (when Compare has been run).
+                     PaneDiffView is shared with BatchPreviewWindow so the
+                     diff visuals are identical to the popup version, just
+                     embedded here so the user doesn't have to juggle two
+                     windows when reviewing before Execute.
+                   • Last-run / docs panel (when no comparison is loaded).
+                     Same content as before — restored when the inline
+                     preview is cleared. -->
+            <Grid Grid.Row="2">
+                <!-- Inline comparison: rendered when CompareCommand has produced a Preview. -->
+                <v:PaneDiffView DataContext="{Binding Preview}"
+                                IsVisible="{Binding #SyncRoot.((vm:SyncViewModel)DataContext).HasInlinePreview}"/>
+
+                <!-- Default / "no comparison yet" body. -->
+                <Border Classes="card" VerticalAlignment="Top"
+                        IsVisible="{Binding !HasInlinePreview}">
+                    <StackPanel Spacing="10">
+                        <StackPanel>
+                            <TextBlock Classes="sectionTitle" Text="Last run"/>
+                            <StackPanel IsVisible="{Binding LastZipPath, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                <TextBlock Text="Pair zip" Opacity="0.55" FontSize="11" Margin="0,0,0,3"/>
+                                <SelectableTextBlock Text="{Binding LastZipPath}" Classes="mono"/>
+                            </StackPanel>
+                            <TextBlock Opacity="0.5" FontSize="11"
+                                       IsVisible="{Binding LastZipPath, Converter={x:Static StringConverters.IsNullOrEmpty}}"
+                                       Text="No runs yet on this tab. Type an object name, tick targets, and hit Compare to see the diff inline before running."/>
                         </StackPanel>
-                        <TextBlock Opacity="0.5" FontSize="11"
-                                   IsVisible="{Binding LastZipPath, Converter={x:Static StringConverters.IsNullOrEmpty}}"
-                                   Text="No runs yet on this tab."/>
+                        <StackPanel>
+                            <TextBlock Classes="sectionTitle" Text="Backup root"/>
+                            <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                                       Text="Files live at {Backups}\{yyyy-MM-dd}\{runStamp}_{role}_{env}\{type}\{name}.sql. Nothing is ever overwritten."/>
+                        </StackPanel>
+                        <StackPanel>
+                            <TextBlock Classes="sectionTitle" Text="Sync semantics"/>
+                            <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
+                                       Text="If the object exists on a target, the source CREATE is rewritten as ALTER (procs / functions / views / triggers). Otherwise the original CREATE runs. Tables fall through unchanged — table schema migrations aren't auto-rewritten."/>
+                        </StackPanel>
                     </StackPanel>
-                    <StackPanel>
-                        <TextBlock Classes="sectionTitle" Text="Backup root"/>
-                        <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                                   Text="Files live at {Backups}\{yyyy-MM-dd}\{runStamp}_{role}_{env}\{type}\{name}.sql. Nothing is ever overwritten."/>
-                    </StackPanel>
-                    <StackPanel>
-                        <TextBlock Classes="sectionTitle" Text="Sync semantics"/>
-                        <TextBlock Opacity="0.55" FontSize="11" TextWrapping="Wrap"
-                                   Text="If the object exists on a target, the source CREATE is rewritten as ALTER (procs / functions / views / triggers). Otherwise the original CREATE runs. Tables fall through unchanged — table schema migrations aren't auto-rewritten."/>
-                    </StackPanel>
-                </StackPanel>
-            </Border>
+                </Border>
+            </Grid>
 
             <Border Grid.Row="3" Classes="pageStatus">
                 <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>

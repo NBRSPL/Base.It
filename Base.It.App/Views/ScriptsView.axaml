@@ -5,20 +5,21 @@
              x:DataType="vm:ScriptsViewModel">
 
     <!-- Layout intent (matches Batch's compactness):
-           Row 0  context: target popover + action buttons
-           Row 1  ITEMS area: file picker buttons inline + drop zone /
-                  custom header / DataGrid
-           Row 2  status text -->
+           Row 0  context: target popover + add-files / add-folder
+           Row 1  ITEMS area: filter + Remove selected / Clear + grid
+           Row 2  Execute (the commit action) — pinned at the bottom so
+                  it can't be misread as just-another-button up top
+           Row 3  status text -->
     <DockPanel>
         <ProgressBar DockPanel.Dock="Top" Classes="pageLoader" IsVisible="{Binding IsBusy}"/>
 
-        <Grid RowDefinitions="Auto,*,Auto">
+        <Grid RowDefinitions="Auto,*,Auto,Auto">
 
             <!-- ─────────── Row 0: targets + actions ─────────── -->
             <!-- Same target-picker shape as Batch: "To" pill with searchable
                  dropdown + inline chip strip + clear / +N overflow. -->
             <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,6">
-                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto">
+                <Grid ColumnDefinitions="*,Auto,Auto">
 
                     <Border Grid.Column="0"
                             Background="{DynamicResource App.ElevatedBgBrush}"
@@ -156,10 +157,6 @@
                     <Button Grid.Column="2" Margin="4,0,0,0" MinWidth="120" Content="+ Add folder…"
                             Click="OnAddFolderClick"
                             ToolTip.Tip="Pick a folder — every .sql below it is added (recursive)."/>
-                    <Button Grid.Column="3" Margin="4,0,0,0" MinWidth="84" Content="Execute" Classes="accent"
-                            Command="{Binding ExecuteCommand}" IsEnabled="{Binding !IsBusy}"/>
-                    <Button Grid.Column="4" Margin="4,0,0,0" MinWidth="64" Content="Clear"
-                            Command="{Binding ClearCommand}"/>
                 </Grid>
             </Border>
 
@@ -173,7 +170,7 @@
                             BorderBrush="{DynamicResource App.StrokeBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="10,6">
-                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto">
                             <TextBlock Grid.Column="0" Text="Files" VerticalAlignment="Center"
                                        FontSize="11" Opacity="0.7" Margin="0,0,8,0"/>
                             <!-- spacer @ col 1 -->
@@ -181,11 +178,15 @@
                                     Content="Remove selected"
                                     Command="{Binding RemoveCheckedCommand}"
                                     ToolTip.Tip="Remove rows whose checkbox is ticked."/>
-                            <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="12,0,12,0"
+                            <Button Grid.Column="3" Margin="0,0,4,0" Padding="8,2" MinHeight="26"
+                                    Content="Clear"
+                                    Command="{Binding ClearCommand}"
+                                    ToolTip.Tip="Remove every row from the list."/>
+                            <TextBlock Grid.Column="4" VerticalAlignment="Center" Margin="12,0,12,0"
                                        FontSize="11"
                                        Foreground="{DynamicResource SystemFillColorSuccessBrush}"
                                        Text="{Binding SuccessCount, StringFormat='OK: {0}'}"/>
-                            <TextBlock Grid.Column="4" VerticalAlignment="Center"
+                            <TextBlock Grid.Column="5" VerticalAlignment="Center"
                                        FontSize="11"
                                        Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                                        Text="{Binding FailCount, StringFormat='Fail: {0}'}"/>
@@ -277,7 +278,9 @@
                                         <DataTemplate DataType="vm:ScriptItem">
                                             <Button Classes="rowIconBtn" Click="OnPreviewClick" Tag="{Binding}"
                                                     ToolTip.Tip="Preview the file content side-by-side with each ticked target's current definition (when the file references a known object).">
-                                                <TextBlock Text="👁" FontSize="12"/>
+                                                <TextBlock Text="&#xE890;"
+                                                           FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                           FontSize="13"/>
                                             </Button>
                                         </DataTemplate>
                                     </DataGridTemplateColumn.CellTemplate>
@@ -328,7 +331,26 @@
                 </DockPanel>
             </Border>
 
-            <Border Grid.Row="2" Classes="pageStatus">
+            <!-- ─────────── Row 2: Execute (the commit action) ───────────
+                 Pinned to the bottom of the page so it reads as a deliberate
+                 commit step, not just another button up in the toolbar.
+                 Mirrors Batch's bottom-row Execute placement. -->
+            <Border Grid.Row="2" Margin="0,8,0,0">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock Grid.Column="0" Classes="subtle" VerticalAlignment="Center"
+                               Text="{Binding TargetSelectedCount, StringFormat='Will run on {0} target(s).'}"
+                               IsVisible="{Binding TargetSelectedCount}"
+                               TextWrapping="Wrap"/>
+                    <Button Grid.Column="1" Classes="accent"
+                            MinWidth="120" MinHeight="30" FontSize="12" FontWeight="SemiBold"
+                            Content="Execute"
+                            Command="{Binding ExecuteCommand}"
+                            IsEnabled="{Binding !IsBusy}"
+                            ToolTip.Tip="Run every script against every ticked target."/>
+                </Grid>
+            </Border>
+
+            <Border Grid.Row="3" Classes="pageStatus">
                 <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
             </Border>
         </Grid>

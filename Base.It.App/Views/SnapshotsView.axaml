@@ -1,0 +1,859 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:Base.It.App.ViewModels"
+             xmlns:sc="using:Base.It.Core.Schema"
+             x:Class="Base.It.App.Views.SnapshotsView"
+             x:Name="SnapRoot"
+             x:DataType="vm:SnapshotsViewModel">
+
+    <!-- Page layout intent:
+           Top:    progress bar (always visible while loading)
+           Bottom: status line (pinned)
+           Middle: ScrollViewer with all content — so when the compare
+                   section grows, the page scrolls instead of squishing
+                   the browser section above. Sections have their own
+                   sensible heights/MaxHeights; the page scroll absorbs
+                   any overflow.
+
+         Right margin on the inner StackPanel reserves space for the
+         vertical scrollbar so it doesn't overlay the rightmost
+         buttons / chips. -->
+    <DockPanel>
+        <ProgressBar DockPanel.Dock="Top" Classes="pageLoader" IsVisible="{Binding IsBusy}"/>
+        <Border DockPanel.Dock="Bottom" Classes="pageStatus">
+            <TextBlock Text="{Binding Status}" TextWrapping="Wrap"/>
+        </Border>
+
+        <ScrollViewer x:Name="PageScroll"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Padding="0,0,0,0">
+            <StackPanel Spacing="6" Margin="0,0,12,0">
+
+                <!-- ─────────── Toolbar ─────────── -->
+                <Border Classes="toolbar">
+                    <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto,Auto">
+
+                        <TextBlock Grid.Column="0" Text="Snapshot of" FontSize="11" FontWeight="SemiBold"
+                                   Opacity="0.85" VerticalAlignment="Center" Margin="0,0,6,0"
+                                   Foreground="{DynamicResource App.AccentBrush}"/>
+
+                        <Border Grid.Column="1" Classes="dropdownShell">
+                            <ComboBox MinWidth="240"
+                                      ItemsSource="{Binding Endpoints}"
+                                      SelectedItem="{Binding SelectedEndpoint}"
+                                      PlaceholderText="Pick a connection">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate DataType="vm:EndpointPick">
+                                        <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                                            <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
+                                                     Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                     Margin="0,0,8,0"/>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="{Binding Label}" FontSize="12"/>
+                                                <TextBlock Text="{Binding SubLabel}"
+                                                           FontSize="10" Opacity="0.55"
+                                                           IsVisible="{Binding ShowSubLabel}"/>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </Border>
+
+                        <Button Grid.Column="2" Margin="8,0,0,0" MinWidth="120" Classes="accent"
+                                Content="Snapshot Now"
+                                Command="{Binding SnapshotNowCommand}"
+                                IsEnabled="{Binding !IsBusy}"
+                                ToolTip.Tip="Capture a new snapshot of the picked endpoint."/>
+
+                        <Button Grid.Column="3" Margin="6,0,0,0" Padding="8,4" MinHeight="30"
+                                Command="{Binding OpenStoreFolderCommand}"
+                                ToolTip.Tip="Open the on-disk schema store in Explorer.">
+                            <TextBlock Text="&#xE838;"
+                                       FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                       FontSize="14"/>
+                        </Button>
+
+                        <TextBlock Grid.Column="4" VerticalAlignment="Center" Margin="14,0,0,0"
+                                   FontSize="11" Opacity="0.7"
+                                   TextTrimming="CharacterEllipsis"
+                                   Text="{Binding SnapshotProgress}"/>
+
+                        <Border Grid.Column="5" Classes="countPill" Margin="6,0,0,0">
+                            <TextBlock Text="{Binding StatsSnapshotCount, StringFormat='{}{0} snapshots'}"/>
+                        </Border>
+                        <Border Grid.Column="6" Classes="countPill" Margin="4,0,0,0">
+                            <TextBlock Text="{Binding StatsUniqueObjects, StringFormat='{}{0} unique objects'}"/>
+                        </Border>
+                        <Border Grid.Column="7" Classes="countPill" Margin="4,0,0,0">
+                            <TextBlock Text="{Binding StatsDiskSize, StringFormat='disk: {0}'}"/>
+                        </Border>
+                        <Border Grid.Column="8" Classes="countPill" Margin="4,0,0,0"
+                                IsVisible="{Binding StatsSavings, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                            <TextBlock Text="{Binding StatsSavings}"/>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <!-- ─────────── Snapshot browser ───────────
+                     MaxHeight=400 caps the section. MinHeight is bound to
+                     the VM — 0 when no snapshot is picked (truly collapses
+                     to the section title bars), 400 the moment one is
+                     clicked (so the entries grid lands at full height and
+                     doesn't grow-with-content as rows trickle in). The SQL
+                     section already collapses to a single-line header
+                     when no entry is selected. -->
+                <Grid ColumnDefinitions="320,*" MaxHeight="400"
+                      MinHeight="{Binding RightColumnMinHeight}">
+
+                    <Border Grid.Column="0" Classes="card" Margin="0,0,6,0" Padding="0">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Snapshots (newest first)"
+                                       Classes="sectionTitle" Margin="10,8,10,4"/>
+                            <ListBox ItemsSource="{Binding Snapshots}"
+                                     SelectedItem="{Binding SelectedSnapshot}"
+                                     Background="Transparent" BorderThickness="0"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="vm:SnapshotSummaryVm">
+                                        <StackPanel Spacing="2" Margin="2,4">
+
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock Grid.Column="0"
+                                                           Text="{Binding DisplayName}"
+                                                           FontWeight="SemiBold" FontSize="12"
+                                                           VerticalAlignment="Center"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           IsVisible="{Binding !IsEditing}"/>
+                                                <TextBox Grid.Column="0"
+                                                         Text="{Binding EditingName, Mode=TwoWay}"
+                                                         FontSize="12"
+                                                         Padding="4,2" MinHeight="0"
+                                                         IsVisible="{Binding IsEditing}"
+                                                         Tag="{Binding}"
+                                                         KeyDown="OnSnapshotNameKeyDown"
+                                                         LostFocus="OnSnapshotNameLostFocus"
+                                                         Watermark="(use timestamp)"/>
+                                                <Button Grid.Column="1"
+                                                        Padding="4,0" MinWidth="0" MinHeight="0"
+                                                        Background="Transparent" BorderThickness="0"
+                                                        Click="OnSnapshotNameEditClick" Tag="{Binding}"
+                                                        IsVisible="{Binding !IsEditing}"
+                                                        ToolTip.Tip="Rename this snapshot">
+                                                    <TextBlock Text="&#xE104;"
+                                                               FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                               FontSize="10" Opacity="0.55"/>
+                                                </Button>
+                                            </Grid>
+
+                                            <TextBlock Text="{Binding TakenAtUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss} UTC'}"
+                                                       FontSize="10" Opacity="0.55"
+                                                       IsVisible="{Binding HasCustomName}"/>
+
+                                            <TextBlock Text="{Binding ObjectCount, StringFormat='{}{0:N0} objects'}"
+                                                       FontSize="11" Opacity="0.6"/>
+                                            <TextBlock Text="{Binding Id}"
+                                                       FontFamily="Consolas, Cascadia Mono"
+                                                       FontSize="10" Opacity="0.4"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Right column: Entries grid on top, SQL viewer at
+                         bottom, with a draggable splitter between them so
+                         the user can give either pane more room. The SQL
+                         row starts at 200px and is bounded so the user
+                         can't shrink it below the title bar or grow it
+                         past a usable fraction of the page. The splitter
+                         only shows when an entry is selected — until then
+                         the SQL section is a one-line title bar with
+                         nothing useful to resize. -->
+                    <!-- Star-based rows on both sides of the splitter so the
+                         drag is a real see-saw: pulling the seam DOWN grows
+                         row 0 (Entries) and shrinks row 2 (SQL) by the
+                         exact same number of pixels, and vice versa. The
+                         old setup used "*,Auto,Auto" with a fixed
+                         Height=200 on the SQL Border itself, which meant
+                         the row size came from the Border instead of the
+                         row — the visual seam wasn't where the resize was
+                         actually happening, and the splitter line floated
+                         in the gap between cards. Star rows fix the
+                         "messy" detachment. MinHeight on each row keeps a
+                         pane from collapsing past the title bar. -->
+                    <Grid Grid.Column="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="3*" MinHeight="60"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="2*" MinHeight="40"/>
+                        </Grid.RowDefinitions>
+
+                        <!-- Entries section. Same UI pattern as the compare
+                                 grid: custom column header above + DataGrid
+                                 with HeadersVisibility=None. Schema and
+                                 Object Type are filterable (funnel flyout);
+                                 Name and Size are sortable (inline arrow
+                                 next to the label); Hash is just a display
+                                 column. Collapses to the title bar alone
+                                 when no snapshot is picked. -->
+                            <Border Grid.Row="0" Classes="card" Padding="0">
+                                <DockPanel>
+                                    <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                                          Margin="10,8,10,6">
+                                        <!-- Title and hint both bottom-aligned so their
+                                             baselines line up. The sectionTitle class
+                                             ships with Margin=0,0,0,6 which would push
+                                             the title's text upward relative to a
+                                             center-aligned hint and look misaligned —
+                                             zero it out here. -->
+                                        <TextBlock Grid.Column="0" Classes="sectionTitle"
+                                                   Text="Objects in this snapshot"
+                                                   VerticalAlignment="Bottom"
+                                                   Margin="0"/>
+                                        <TextBlock Grid.Column="1" Margin="8,0,0,0"
+                                                   FontSize="11" Opacity="0.55"
+                                                   VerticalAlignment="Bottom"
+                                                   Text="(select a snapshot on the left)"
+                                                   IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNull}}"/>
+                                        <TextBox  Grid.Column="2" x:Name="EntryFilterBox"
+                                                  Width="240"
+                                                  Text="{Binding EntryFilter, Mode=TwoWay}"
+                                                  Watermark="Filter by name or object type…"
+                                                  IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNotNull}}"/>
+                                    </Grid>
+
+                                    <!-- Custom header. Column defs MUST mirror the
+                                         DataGrid's Columns below. -->
+                                    <Border DockPanel.Dock="Top"
+                                            Background="{DynamicResource App.ElevatedBgBrush}"
+                                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                                            BorderThickness="0,0,0,1"
+                                            IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                        <Grid ColumnDefinitions="90,*,130,140,80" Margin="0,7">
+                                            <!-- Schema (funnel filter) -->
+                                            <Button Grid.Column="0"
+                                                    Background="Transparent" BorderThickness="0"
+                                                    Padding="6,0,0,0"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal" Spacing="6"
+                                                            VerticalAlignment="Center">
+                                                    <TextBlock Text="Schema"
+                                                               FontSize="11" FontWeight="SemiBold"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                    <TextBlock Text="&#xE71C;"
+                                                               FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                               FontSize="11" Opacity="0.6"
+                                                               VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                                <Button.Flyout>
+                                                    <Flyout Placement="Bottom">
+                                                        <StackPanel Spacing="2" MinWidth="160">
+                                                            <TextBlock Text="Filter by schema" FontSize="11" Opacity="0.6" Margin="0,0,0,4"/>
+                                                            <ItemsControl ItemsSource="{Binding EntrySchemaFilterValues}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate DataType="vm:DiffFilterValue">
+                                                                        <CheckBox Content="{Binding Value}"
+                                                                                  IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                                                  Margin="0,2"/>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </Flyout>
+                                                </Button.Flyout>
+                                            </Button>
+
+                                            <!-- Name (sort arrow inline) -->
+                                            <Button Grid.Column="1"
+                                                    Background="Transparent" BorderThickness="0"
+                                                    Padding="6,0,0,0"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Command="{Binding ToggleEntryNameSortCommand}"
+                                                    ToolTip.Tip="Click to sort A→Z / Z→A / clear sort.">
+                                                <StackPanel Orientation="Horizontal" Spacing="4"
+                                                            VerticalAlignment="Center">
+                                                    <TextBlock Text="Name"
+                                                               FontSize="11" FontWeight="SemiBold"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                    <TextBlock Text="{Binding EntryNameSortIndicator}"
+                                                               FontSize="10" Opacity="0.7"
+                                                               VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
+
+                                            <!-- Object Type (funnel filter) -->
+                                            <Button Grid.Column="2"
+                                                    Background="Transparent" BorderThickness="0"
+                                                    Padding="6,0,0,0"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left">
+                                                <StackPanel Orientation="Horizontal" Spacing="6"
+                                                            VerticalAlignment="Center">
+                                                    <TextBlock Text="Object Type"
+                                                               FontSize="11" FontWeight="SemiBold"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                    <TextBlock Text="&#xE71C;"
+                                                               FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                               FontSize="11" Opacity="0.6"
+                                                               VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                                <Button.Flyout>
+                                                    <Flyout Placement="Bottom">
+                                                        <StackPanel Spacing="2" MinWidth="200">
+                                                            <TextBlock Text="Filter by object type" FontSize="11" Opacity="0.6" Margin="0,0,0,4"/>
+                                                            <ItemsControl ItemsSource="{Binding EntryKindFilterValues}">
+                                                                <ItemsControl.ItemTemplate>
+                                                                    <DataTemplate DataType="vm:DiffFilterValue">
+                                                                        <CheckBox Content="{Binding Value}"
+                                                                                  IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                                                  Margin="0,2"/>
+                                                                    </DataTemplate>
+                                                                </ItemsControl.ItemTemplate>
+                                                            </ItemsControl>
+                                                        </StackPanel>
+                                                    </Flyout>
+                                                </Button.Flyout>
+                                            </Button>
+
+                                            <!-- Hash (label only, no sort/filter) -->
+                                            <TextBlock Grid.Column="3"
+                                                       Text="Hash"
+                                                       FontSize="11" FontWeight="SemiBold"
+                                                       VerticalAlignment="Center" Margin="6,0,0,0"
+                                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+
+                                            <!-- Size (sort arrow inline) -->
+                                            <Button Grid.Column="4"
+                                                    Background="Transparent" BorderThickness="0"
+                                                    Padding="6,0,0,0"
+                                                    HorizontalAlignment="Stretch"
+                                                    HorizontalContentAlignment="Left"
+                                                    Command="{Binding ToggleEntrySizeSortCommand}"
+                                                    ToolTip.Tip="Click to sort smallest→largest / largest→smallest / clear sort.">
+                                                <StackPanel Orientation="Horizontal" Spacing="4"
+                                                            VerticalAlignment="Center">
+                                                    <TextBlock Text="Size"
+                                                               FontSize="11" FontWeight="SemiBold"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                    <TextBlock Text="{Binding EntrySizeSortIndicator}"
+                                                               FontSize="10" Opacity="0.7"
+                                                               VerticalAlignment="Center"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </Grid>
+                                    </Border>
+
+                                    <DataGrid ItemsSource="{Binding Entries}"
+                                              SelectedItem="{Binding SelectedEntry}"
+                                              AutoGenerateColumns="False"
+                                              GridLinesVisibility="Horizontal"
+                                              HeadersVisibility="None"
+                                              CanUserReorderColumns="False"
+                                              SelectionMode="Single"
+                                              IsReadOnly="True"
+                                              IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                        <DataGrid.Columns>
+                                            <DataGridTemplateColumn Width="90" CanUserSort="False">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate DataType="vm:SnapshotEntryVm">
+                                                        <TextBlock Text="{Binding Schema}" VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTemplateColumn Width="*" CanUserSort="False">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate DataType="vm:SnapshotEntryVm">
+                                                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTemplateColumn Width="130" CanUserSort="False">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate DataType="vm:SnapshotEntryVm">
+                                                        <TextBlock Text="{Binding Kind}" VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTemplateColumn Width="140" CanUserSort="False">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate DataType="vm:SnapshotEntryVm">
+                                                        <TextBlock Text="{Binding HashShort}" VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                            <DataGridTemplateColumn Width="80" CanUserSort="False">
+                                                <DataGridTemplateColumn.CellTemplate>
+                                                    <DataTemplate DataType="vm:SnapshotEntryVm">
+                                                        <TextBlock Text="{Binding SizeDisplay}" VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                    </DataTemplate>
+                                                </DataGridTemplateColumn.CellTemplate>
+                                            </DataGridTemplateColumn>
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </Border>
+
+                        <!-- ── Splitter between Entries (row 0) and SQL (row 2) ──
+                             Standard splitter UX: a thin visible divider
+                             line (matches the card borders' colour so it
+                             reads as "where the seam is"), hover state
+                             highlights with the accent colour so the user
+                             sees it's draggable, cursor flips to vertical-
+                             resize on hover. Drag reallocates pixel height
+                             between row 0 (Entries, '*') and the SQL row
+                             below. 4 px is thin enough to look like a rule
+                             but thick enough for a comfortable hit target. -->
+                        <GridSplitter Grid.Row="1" Height="4"
+                                      HorizontalAlignment="Stretch"
+                                      Background="{DynamicResource App.StrokeBrush}"
+                                      ResizeDirection="Rows"
+                                      ResizeBehavior="PreviousAndNext">
+                            <GridSplitter.Styles>
+                                <Style Selector="GridSplitter:pointerover">
+                                    <Setter Property="Background"
+                                            Value="{DynamicResource App.AccentBrush}"/>
+                                </Style>
+                            </GridSplitter.Styles>
+                        </GridSplitter>
+
+                        <!-- ── SQL pane (row 2) ──
+                             Pixel size comes from the Grid row's 2*
+                             definition (with MinHeight=40 keeping it from
+                             collapsing past the title bar). Dragging the
+                             splitter resizes the row, which resizes this
+                             Border, which resizes the SQL viewer inside —
+                             one synced see-saw with the Entries card
+                             above. The Border itself no longer carries a
+                             fixed Height; that's what was making the
+                             splitter look detached from the card edges. -->
+                        <Border Grid.Row="2" Classes="card" Padding="0">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Top" Padding="10,6">
+                                    <TextBlock Text="{Binding SelectedEntry.FullName, FallbackValue='SQL definition (select an object above)'}"
+                                               Classes="sectionTitle"/>
+                                </Border>
+
+                                <!-- Triggers sidebar: right-docked, 220 px,
+                                     only when the selected entry is a Table
+                                     with at least one trigger linked. -->
+                                <Border DockPanel.Dock="Right" Width="220"
+                                        BorderBrush="{DynamicResource App.StrokeBrush}"
+                                        BorderThickness="1,0,0,0"
+                                        IsVisible="{Binding HasRelatedTriggers}">
+                                    <DockPanel>
+                                        <Border DockPanel.Dock="Top" Padding="10,6,10,4">
+                                            <StackPanel Spacing="2">
+                                                <TextBlock Text="Triggers on this table"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                <TextBlock Text="(synced as separate objects)"
+                                                           FontSize="10" Opacity="0.55"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <ListBox ItemsSource="{Binding RelatedTriggers}"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 SelectionMode="Single">
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate DataType="vm:SnapshotEntryVm">
+                                                    <Button Background="Transparent" BorderThickness="0"
+                                                            HorizontalAlignment="Stretch"
+                                                            HorizontalContentAlignment="Left"
+                                                            Padding="6,4"
+                                                            Command="{Binding $parent[ItemsControl].((vm:SnapshotsViewModel)DataContext).JumpToTriggerCommand}"
+                                                            CommandParameter="{Binding}"
+                                                            ToolTip.Tip="{Binding FullName}">
+                                                        <TextBlock Text="{Binding Name}"
+                                                                   FontSize="11"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
+                                    </DockPanel>
+                                </Border>
+
+                                <Border IsVisible="{Binding SelectedEntry, Converter={x:Static ObjectConverters.IsNotNull}}">
+                                    <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                                  VerticalScrollBarVisibility="Auto">
+                                        <SelectableTextBlock Text="{Binding EntrySql}"
+                                                             FontFamily="Consolas, Cascadia Mono"
+                                                             FontSize="12"
+                                                             Padding="10,4,10,8"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </DockPanel>
+                        </Border>
+                    </Grid>
+                </Grid>
+
+                <!-- ─────────── Cross-store compare + promote ───────────
+                     No fixed height — section grows with content. The
+                     outer ScrollViewer handles overflow at the page
+                     level. The diff result grid has its own internal
+                     scroll capped at 400 so a huge diff doesn't make
+                     the whole page absurdly long. -->
+                <Border Classes="toolbar" Padding="10,8">
+                    <DockPanel>
+
+                        <Grid DockPanel.Dock="Top" RowDefinitions="Auto,Auto" ColumnDefinitions="Auto,Auto,Auto,*,Auto"
+                              Margin="0,0,0,4">
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Compare"
+                                       FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource App.AccentBrush}"
+                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                            <TextBlock Grid.Row="0" Grid.Column="1" Text="From" Opacity="0.7"
+                                       VerticalAlignment="Center" Margin="0,0,6,0" FontSize="11"/>
+                            <ComboBox Grid.Row="0" Grid.Column="2" MinWidth="200" Margin="0,0,6,0"
+                                      ItemsSource="{Binding Endpoints}"
+                                      SelectedItem="{Binding DiffFromEndpoint}"
+                                      PlaceholderText="From endpoint">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate DataType="vm:EndpointPick">
+                                        <Grid ColumnDefinitions="Auto,*">
+                                            <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
+                                                     Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                     Margin="0,0,8,0"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Label}" FontSize="12"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <ComboBox Grid.Row="0" Grid.Column="3" Margin="0,0,0,0" MinWidth="240"
+                                      ItemsSource="{Binding DiffFromSnapshots}"
+                                      SelectedItem="{Binding DiffFromSnapshot}"
+                                      PlaceholderText="(no snapshots — capture one first)">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate DataType="vm:SnapshotSummaryVm">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding DisplayName}" FontSize="11"/>
+                                            <TextBlock Text="{Binding TakenAtUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss} UTC'}"
+                                                       FontSize="9" Opacity="0.55"
+                                                       IsVisible="{Binding HasCustomName}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <Button Grid.Row="0" Grid.Column="4" Margin="6,0,0,0"
+                                    Content="Compare"
+                                    Classes="accent"
+                                    Command="{Binding CompareSnapshotsCommand}"
+                                    IsEnabled="{Binding !IsBusy}"
+                                    ToolTip.Tip="Diff the two picked snapshots."/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="1" Text="To" Opacity="0.7"
+                                       VerticalAlignment="Center" Margin="0,4,6,0" FontSize="11"/>
+                            <ComboBox Grid.Row="1" Grid.Column="2" MinWidth="200" Margin="0,4,6,0"
+                                      ItemsSource="{Binding Endpoints}"
+                                      SelectedItem="{Binding DiffToEndpoint}"
+                                      PlaceholderText="To endpoint">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate DataType="vm:EndpointPick">
+                                        <Grid ColumnDefinitions="Auto,*">
+                                            <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
+                                                     Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
+                                                     Margin="0,0,8,0"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding Label}" FontSize="12"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                            <ComboBox Grid.Row="1" Grid.Column="3" Margin="0,4,0,0" MinWidth="240"
+                                      ItemsSource="{Binding DiffToSnapshots}"
+                                      SelectedItem="{Binding DiffToSnapshot}"
+                                      PlaceholderText="(no snapshots — capture one first)">
+                                <ComboBox.ItemTemplate>
+                                    <DataTemplate DataType="vm:SnapshotSummaryVm">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding DisplayName}" FontSize="11"/>
+                                            <TextBlock Text="{Binding TakenAtUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm:ss} UTC'}"
+                                                       FontSize="9" Opacity="0.55"
+                                                       IsVisible="{Binding HasCustomName}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ComboBox.ItemTemplate>
+                            </ComboBox>
+                        </Grid>
+
+                        <!-- Action bar — the "All visible" toggle lives in the
+                             grid's first column header (Button styled as a
+                             checkbox), so it's NOT duplicated here. -->
+                        <Grid DockPanel.Dock="Top" Margin="0,6,0,4"
+                              ColumnDefinitions="360,*,Auto,Auto"
+                              IsVisible="{Binding DiffHasResult}">
+                            <TextBox Grid.Column="0" x:Name="DiffFilterBox"
+                                     Text="{Binding DiffFilter, Mode=TwoWay}"
+                                     Watermark="Filter rows by name / object type / status"/>
+                            <TextBlock Grid.Column="1" Margin="14,0,8,0" VerticalAlignment="Center"
+                                       FontSize="11" Opacity="0.75"
+                                       TextTrimming="CharacterEllipsis">
+                                <Run Text="{Binding DiffSummary}"/>
+                                <Run Text=" · "/>
+                                <Run Text="{Binding DiffSelectedCount}"/>
+                                <Run Text=" selected"/>
+                            </TextBlock>
+                            <Button Grid.Column="2" Margin="0,0,4,0"
+                                    Content="Clear list"
+                                    Command="{Binding ClearDiffListCommand}"
+                                    ToolTip.Tip="Empty the diff result. Click Compare again to repopulate."/>
+                            <Button Grid.Column="3"
+                                    Content="Send to Batch →"
+                                    Classes="accent"
+                                    Command="{Binding SendDiffToBatchCommand}"
+                                    IsEnabled="{Binding HasDiffSelection}"
+                                    ToolTip.Tip="Open the Batch screen pre-filled with the ticked objects."/>
+                        </Grid>
+
+                        <!-- Diff result: custom column header above + DataGrid
+                             below, same pattern Batch uses. Why not the
+                             DataGrid's built-in header? Because the
+                             DataGridColumnHeader chrome doesn't line up
+                             pixel-perfectly with DataGridCell — header
+                             content lands a few pixels offset from cell
+                             content, which is exactly what made the
+                             column-0 select-all button drift right of the
+                             row checkboxes. Rendering the header in a
+                             plain Border+Grid with identical
+                             ColumnDefinitions as the DataGrid guarantees
+                             header X-coordinates match cell X-coordinates.
+                             -->
+                        <Border BorderThickness="1"
+                                BorderBrush="{DynamicResource App.StrokeBrush}"
+                                CornerRadius="4"
+                                MaxHeight="400"
+                                IsVisible="{Binding DiffHasResult}">
+                            <DockPanel>
+                                <!-- Custom header row. Column defs MUST mirror the
+                                     DataGrid's Columns widths below, otherwise
+                                     header and rows fall out of sync. The
+                                     per-row preview eye lives INSIDE the Name
+                                     cell (right-aligned) rather than in its
+                                     own column, so it stays adjacent to the
+                                     object it previews. -->
+                                <Border DockPanel.Dock="Top"
+                                        Background="{DynamicResource App.ElevatedBgBrush}"
+                                        BorderBrush="{DynamicResource App.StrokeBrush}"
+                                        BorderThickness="0,0,0,1">
+                                    <Grid ColumnDefinitions="40,120,*,180" Margin="0,7">
+
+                                        <!-- col 0: select-all. Same Button primitive
+                                             the row cells use; identical Width/Height
+                                             ensures pixel-perfect column alignment. -->
+                                        <Button Grid.Column="0"
+                                                Width="20" Height="20"
+                                                Padding="0"
+                                                MinWidth="0" MinHeight="0"
+                                                CornerRadius="3"
+                                                Background="Transparent"
+                                                BorderBrush="{DynamicResource App.StrokeStrongBrush}"
+                                                BorderThickness="2"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                HorizontalContentAlignment="Center"
+                                                VerticalContentAlignment="Center"
+                                                Command="{Binding ToggleAllDiffRowsCommand}"
+                                                ToolTip.Tip="Tick / untick every visible diff row.">
+                                            <TextBlock Text="{Binding SelectAllGlyph}"
+                                                       FontSize="12" FontWeight="Bold"
+                                                       LineHeight="14"
+                                                       TextAlignment="Center"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"/>
+                                        </Button>
+
+                                        <!-- col 1: Status (filter flyout). Padding-left=6
+                                             so the column label aligns with cell text
+                                             (which also has Padding="6,0,0,0"). -->
+                                        <Button Grid.Column="1"
+                                                Background="Transparent" BorderThickness="0"
+                                                Padding="6,0,0,0"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left">
+                                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock Text="Status"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                <TextBlock Text="&#xE71C;"
+                                                           FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                           FontSize="11" Opacity="0.6"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <Flyout Placement="Bottom">
+                                                    <StackPanel Spacing="2" MinWidth="160">
+                                                        <TextBlock Text="Filter by status" FontSize="11" Opacity="0.6" Margin="0,0,0,4"/>
+                                                        <ItemsControl ItemsSource="{Binding StatusFilterValues}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate DataType="vm:DiffFilterValue">
+                                                                    <CheckBox Content="{Binding Value}"
+                                                                              IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                                              Margin="0,2"/>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+
+                                        <!-- col 2: Name with inline sort arrow. -->
+                                        <Button Grid.Column="2"
+                                                Background="Transparent" BorderThickness="0"
+                                                Padding="6,0,0,0"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left"
+                                                Command="{Binding ToggleNameSortCommand}"
+                                                ToolTip.Tip="Click to sort A→Z / Z→A / clear sort.">
+                                            <StackPanel Orientation="Horizontal" Spacing="4"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock Text="Name"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                <TextBlock Text="{Binding NameSortIndicator}"
+                                                           FontSize="10" Opacity="0.7"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+
+                                        <!-- col 3: Object Type (filter flyout). -->
+                                        <Button Grid.Column="3"
+                                                Background="Transparent" BorderThickness="0"
+                                                Padding="6,0,0,0"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left">
+                                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock Text="Object Type"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                <TextBlock Text="&#xE71C;"
+                                                           FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                           FontSize="11" Opacity="0.6"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <Flyout Placement="Bottom">
+                                                    <StackPanel Spacing="2" MinWidth="200">
+                                                        <TextBlock Text="Filter by object type" FontSize="11" Opacity="0.6" Margin="0,0,0,4"/>
+                                                        <ItemsControl ItemsSource="{Binding KindFilterValues}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate DataType="vm:DiffFilterValue">
+                                                                    <CheckBox Content="{Binding Value}"
+                                                                              IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                                              Margin="0,2"/>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+                                    </Grid>
+                                </Border>
+
+                                <DataGrid x:Name="DiffGrid"
+                                          ItemsSource="{Binding DiffRows}"
+                                          AutoGenerateColumns="False"
+                                          GridLinesVisibility="Horizontal"
+                                          HeadersVisibility="None"
+                                          SelectionMode="Single"
+                                          HorizontalAlignment="Stretch">
+                                    <DataGrid.Columns>
+                                        <!-- col 0: row select Button. Header version of
+                                             this Button lives in the custom header
+                                             above (column 0 of the same width). -->
+                                        <DataGridTemplateColumn Width="40" CanUserResize="False" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:SnapshotDiffRowVm">
+                                                    <Button Width="20" Height="20"
+                                                            Padding="0"
+                                                            MinWidth="0" MinHeight="0"
+                                                            CornerRadius="3"
+                                                            Background="Transparent"
+                                                            BorderBrush="{DynamicResource App.StrokeStrongBrush}"
+                                                            BorderThickness="2"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center"
+                                                            HorizontalContentAlignment="Center"
+                                                            VerticalContentAlignment="Center"
+                                                            Command="{Binding ToggleSelectionCommand}">
+                                                        <TextBlock Text="✓"
+                                                                   FontSize="12" FontWeight="Bold"
+                                                                   LineHeight="14"
+                                                                   TextAlignment="Center"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"
+                                                                   IsVisible="{Binding IsSelected}"/>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+
+                                        <DataGridTemplateColumn Width="120" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:SnapshotDiffRowVm">
+                                                    <TextBlock Text="{Binding Status}" VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+
+                                        <!-- Name column: text on the left, preview
+                                             eye pinned to the right edge of the
+                                             same cell. Putting the eye inside the
+                                             Name cell (rather than its own column)
+                                             keeps it adjacent to the object name
+                                             instead of pushed to the far right
+                                             past the Object Type column. -->
+                                        <DataGridTemplateColumn Width="*" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:SnapshotDiffRowVm">
+                                                    <Grid ColumnDefinitions="*,Auto">
+                                                        <TextBlock Grid.Column="0"
+                                                                   Text="{Binding FullName}"
+                                                                   VerticalAlignment="Center"
+                                                                   Padding="6,0,0,0"
+                                                                   TextTrimming="CharacterEllipsis"/>
+                                                        <Button Grid.Column="1" Classes="rowIconBtn"
+                                                                Margin="6,0,6,0"
+                                                                Click="OnDiffRowPreviewClick" Tag="{Binding}"
+                                                                ToolTip.Tip="Preview the FROM and TO definitions for this row side-by-side.">
+                                                            <TextBlock Text="&#xE890;"
+                                                                       FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                                       FontSize="13"/>
+                                                        </Button>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+
+                                        <DataGridTemplateColumn Width="180" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:SnapshotDiffRowVm">
+                                                    <TextBlock Text="{Binding Kind}" VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </Border>
+                    </DockPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</UserControl>

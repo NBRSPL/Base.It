@@ -32,6 +32,22 @@ public sealed partial class SyncViewModel : ObservableObject
     // in sync via _syncingEndpoint so neither side recurses into the other.
     [ObservableProperty] private EndpointPick? _selectedSourceEndpoint;
 
+    // Unified source picker (live + snapshot), mirroring Batch's
+    // BatchSourceItem model. Setting SelectedSource updates
+    // SelectedSourceEndpoint (legacy code paths still read that), plus
+    // SourceMode / SourceSnapshotId / SourceSnapshotDisplayName for the
+    // snapshot branch in ExecuteAsync.
+    [ObservableProperty] private BatchSourceItem? _selectedSource;
+    [ObservableProperty] private BatchSourceMode _sourceMode = BatchSourceMode.Live;
+    [ObservableProperty] private string? _sourceSnapshotId;
+    [ObservableProperty] private string? _sourceSnapshotDisplayName;
+
+    /// <summary>Convenience flag for the "from snapshot…" UI affordances.</summary>
+    public bool IsSnapshotSource => SourceMode == BatchSourceMode.Snapshot;
+
+    /// <summary>Re-entrancy guard for the SelectedSource ↔ SelectedSourceEndpoint pingpong.</summary>
+    private bool _syncingSourceItem;
+
     // Selected saved profile. Setting it applies source + ticked-target
     // state in one shot. Setting back to null clears the selection only —
     // it doesn't undo whatever the user had picked from the profile.
@@ -74,6 +90,14 @@ public sealed partial class SyncViewModel : ObservableObject
 
     /// <summary>Endpoints minus every ticked target — what the SOURCE picker should show.</summary>
     public ObservableCollection<EndpointPick> SourceCandidateEndpoints { get; } = new();
+
+    /// <summary>
+    /// Unified source picker items: live endpoints + every snapshot of
+    /// every endpoint's local store. Mirrors Batch's SourceCandidates.
+    /// Pick a snapshot here and ExecuteAsync replays it; pick a live
+    /// endpoint and ExecuteAsync fetches fresh source SQL at run time.
+    /// </summary>
+    public ObservableCollection<BatchSourceItem> SourceCandidates { get; } = new();
 
     /// <summary>Endpoints minus the source and minus every ticked target — what the "Add target" picker shows.</summary>
     public ObservableCollection<EndpointPick> TargetCandidateEndpoints { get; } = new();
@@ -242,6 +266,29 @@ public sealed partial class SyncViewModel : ObservableObject
         _syncingEndpoint = true;
         try { SelectedSourceEndpoint = match; }
         finally { _syncingEndpoint = false; }
+
+        // Mirror the change into the new BatchSourceItem-based picker so
+        // the AutoCompleteBox visually reflects the new source after a
+        // profile apply / swap / programmatic SourceEnv update. Without
+        // this the dropdown still shows the previous selection because
+        // SelectedSource only updates when the *user* clicks an item.
+        // Only sets when the matching live (non-snapshot) item exists in
+        // SourceCandidates — preserves snapshot picks chosen by hand.
+        if (match is not null && (SelectedSource is null || SelectedSource.IsSnapshot
+            || !ReferenceEquals(SelectedSource.Endpoint, match)))
+        {
+            var liveItem = SourceCandidates.FirstOrDefault(s =>
+                !s.IsSnapshot && ReferenceEquals(s.Endpoint, match));
+            if (liveItem is not null && !ReferenceEquals(liveItem, SelectedSource))
+            {
+                _syncingSourceItem = true;
+                try { SelectedSource = liveItem; }
+                finally { _syncingSourceItem = false; }
+                SourceMode = BatchSourceMode.Live;
+                SourceSnapshotId = null;
+                SourceSnapshotDisplayName = null;
+            }
+        }
     }
 
     /// <summary>
@@ -289,10 +336,22 @@ public sealed partial class SyncViewModel : ObservableObject
         Targets.Clear();
         CheckedTargets.Clear();
 
+        // Live source can't sync to itself — target would overwrite the
+        // source mid-run. Snapshot source CAN: the snapshot is a frozen
+        // disk copy, applying it to the live same-DB is the legitimate
+        // "restore from snapshot" workflow. Same branch as the target-
+        // candidate filter in RebuildEndpointCandidatesCore. Without it,
+        // the user could see the same-DB row in the TargetCandidate
+        // dropdown but clicking it would do nothing — no matching
+        // TargetPickVm in this Targets list for OnNextTargetEndpoint to
+        // tick.
+        var excludeSourceFromTargets = SourceMode == BatchSourceMode.Live;
+
         foreach (var cfg in EnvironmentListProvider.VisibleConnections(_svc))
         {
-            if (string.Equals(cfg.Environment, SourceEnv, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(cfg.Database,    SourceDatabase, StringComparison.OrdinalIgnoreCase))
+            if (excludeSourceFromTargets
+                && string.Equals(cfg.Environment, SourceEnv, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(cfg.Database,    SourceDatabase, StringComparison.OrdinalIgnoreCase))
                 continue;
 
             var pick = TargetPickVm.From(_svc, cfg.Environment, cfg.Database,
@@ -373,14 +432,109 @@ public sealed partial class SyncViewModel : ObservableObject
                 string.Equals(t.Environment, ep.Environment, StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(t.Database,    ep.Database,    StringComparison.OrdinalIgnoreCase));
 
+        // Live source can't sync to itself (target would overwrite the
+        // source mid-run). Snapshot source CAN — replaying a stored
+        // snapshot back onto its own live DB is the "restore from
+        // snapshot" workflow. Mirrors Batch's relaxed rule.
+        var excludeSourceFromTargets = SourceMode == BatchSourceMode.Live;
+
         SourceCandidateEndpoints.Clear();
         TargetCandidateEndpoints.Clear();
         foreach (var ep in Endpoints)
         {
-            if (!MatchesAnyTicked(ep))    SourceCandidateEndpoints.Add(ep);
-            if (!MatchesSource(ep) && !MatchesAnyTicked(ep))
-                                          TargetCandidateEndpoints.Add(ep);
+            if (!MatchesAnyTicked(ep)) SourceCandidateEndpoints.Add(ep);
+            if (!MatchesAnyTicked(ep) && !(excludeSourceFromTargets && MatchesSource(ep)))
+                                       TargetCandidateEndpoints.Add(ep);
         }
+
+        RebuildSourceCandidates(MatchesAnyTicked);
+    }
+
+    /// <summary>
+    /// SourceMode flipping live↔snapshot needs to refresh BOTH the master
+    /// Targets list AND the candidate dropdown. The Targets rebuild is the
+    /// load-bearing one: without it, the same-DB row stays out of the
+    /// master list because RebuildTargets ran while SourceMode was still
+    /// Live (it flips here, *after* SelectedSourceEndpoint), and the
+    /// dropdown click would find no matching TargetPickVm to tick.
+    /// See Batch's matching hook for the same fix.
+    /// </summary>
+    partial void OnSourceModeChanged(BatchSourceMode value)
+    {
+        RebuildTargets();
+        RebuildEndpointCandidates();
+        OnPropertyChanged(nameof(IsSnapshotSource));
+    }
+
+    /// <summary>
+    /// Build the unified picker list: live endpoint per row, plus one
+    /// row per stored snapshot. Snapshots of a ticked-target endpoint
+    /// stay listed (legit "restore the same DB from its snapshot" case).
+    /// </summary>
+    private void RebuildSourceCandidates(Func<EndpointPick, bool> matchesTicked)
+    {
+        var keepKey = SelectedSource?.Key;
+
+        SourceCandidates.Clear();
+        foreach (var ep in Endpoints)
+        {
+            if (!matchesTicked(ep))
+                SourceCandidates.Add(new BatchSourceItem(ep, Snapshot: null));
+
+            // Snapshots from the local store. Cheap (Directory.Exists)
+            // when a store doesn't exist for an endpoint yet.
+            try
+            {
+                var store = _svc.OpenSchemaStore(ep.Environment, ep.Database);
+                foreach (var snap in store.ListSnapshots())
+                    SourceCandidates.Add(new BatchSourceItem(ep, snap));
+            }
+            catch { /* store unreadable — never blow up the picker */ }
+        }
+
+        if (!string.IsNullOrEmpty(keepKey))
+        {
+            var match = SourceCandidates.FirstOrDefault(s => s.Key == keepKey);
+            if (match is not null && !ReferenceEquals(match, SelectedSource))
+            {
+                _syncingSourceItem = true;
+                try { SelectedSource = match; }
+                finally { _syncingSourceItem = false; }
+            }
+        }
+    }
+
+    /// <summary>
+    /// SelectedSource changes drive SelectedSourceEndpoint (legacy
+    /// binding) plus SourceMode / snapshot id so ExecuteAsync can
+    /// branch. Mirrors Batch's OnSelectedSourceChanged.
+    /// </summary>
+    partial void OnSelectedSourceChanged(BatchSourceItem? value)
+    {
+        if (_syncingSourceItem) return;
+        if (value is null)
+        {
+            SourceMode = BatchSourceMode.Live;
+            SourceSnapshotId = null;
+            SourceSnapshotDisplayName = null;
+            return;
+        }
+
+        _syncingSourceItem = true;
+        try
+        {
+            // Update legacy endpoint binding so existing code paths
+            // (SourceEnv/SourceDatabase, target rebuild) see the new
+            // source. SourceMode is set *after* so the live-source
+            // exclusion of same-DB targets evaluates correctly when the
+            // user has just flipped to a snapshot of the same endpoint.
+            SelectedSourceEndpoint = value.Endpoint;
+        }
+        finally { _syncingSourceItem = false; }
+
+        SourceMode = value.IsSnapshot ? BatchSourceMode.Snapshot : BatchSourceMode.Live;
+        SourceSnapshotId = value.Snapshot?.Id;
+        SourceSnapshotDisplayName = value.Snapshot?.DisplayName;
     }
 
     /// <summary>
@@ -556,17 +710,108 @@ public sealed partial class SyncViewModel : ObservableObject
             return;
         }
 
-        var srcConn = _svc.Connections.Get(SourceEnv!, SourceDatabase!);
-        if (string.IsNullOrWhiteSpace(srcConn))
+        // ── Live vs snapshot source ──────────────────────────────────
+        // Live: fetch the source connection string up front and the
+        // ExecuteAsync loop calls SyncAsync (live source backup + fetch).
+        // Snapshot: open the schema store and resolve the object's stored
+        // SQL into a SqlObject; the loop calls SyncFromDefinitionAsync per
+        // target (the snapshot already IS the source-of-truth — no live
+        // connection to the source DB needed). Skips the DACPAC export
+        // branch entirely (the snapshot already serves as the staged copy).
+        string?    srcConn       = null;
+        SqlObject? snapshotSource = null;
+        string     sourceLabel    = $"{SourceEnv}/{SourceDatabase}";
+
+        if (SourceMode == BatchSourceMode.Snapshot)
         {
-            Status = "No connection string for source.";
-            _svc.Toasts.Error("No source connection", $"{SourceEnv}·{SourceDatabase} isn't configured.");
+            if (string.IsNullOrWhiteSpace(SourceSnapshotId))
+            {
+                Status = "Pick a snapshot in the source dropdown.";
+                _svc.Toasts.Warning("No snapshot", "Source mode is snapshot but no snapshot is selected.");
+                return;
+            }
+            try
+            {
+                var store = _svc.OpenSchemaStore(SourceEnv!, SourceDatabase!);
+                var snap  = await store.ReadSnapshotAsync(SourceSnapshotId!);
+                if (snap is null)
+                {
+                    Status = "Snapshot is missing from the schema store.";
+                    _svc.Toasts.Error("Snapshot not found", $"Snapshot {SourceSnapshotId} not in store.");
+                    return;
+                }
+                var entry = snap.Entries.FirstOrDefault(e =>
+                    string.Equals(e.FullName, ObjectName!.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (entry is null)
+                {
+                    Status = $"'{ObjectName}' isn't in the selected snapshot.";
+                    _svc.Toasts.Warning("Not in snapshot",
+                        $"'{ObjectName}' wasn't captured in this snapshot.");
+                    return;
+                }
+                var sql = await store.ReadObjectAsync(entry.Hash);
+                if (string.IsNullOrWhiteSpace(sql))
+                {
+                    Status = "Snapshot entry has no readable SQL.";
+                    _svc.Toasts.Error("Empty definition", $"'{ObjectName}' has no SQL in the snapshot.");
+                    return;
+                }
+                snapshotSource = new SqlObject(
+                    new ObjectIdentifier(entry.Schema, entry.Name),
+                    entry.Kind,
+                    sql!,
+                    entry.Hash);
+                var snapLabel = string.IsNullOrWhiteSpace(SourceSnapshotDisplayName)
+                    ? "snapshot"
+                    : SourceSnapshotDisplayName;
+                sourceLabel = $"{SourceEnv}/{SourceDatabase} @ {snapLabel}";
+            }
+            catch (Exception ex)
+            {
+                Status = $"Could not read snapshot: {ex.Message}";
+                _svc.Toasts.Error("Snapshot read failed", ex.Message);
+                return;
+            }
+        }
+        else
+        {
+            srcConn = _svc.Connections.Get(SourceEnv!, SourceDatabase!);
+            if (string.IsNullOrWhiteSpace(srcConn))
+            {
+                Status = "No connection string for source.";
+                _svc.Toasts.Error("No source connection", $"{SourceEnv}·{SourceDatabase} isn't configured.");
+                return;
+            }
+        }
+
+        // Major-action gate: Execute mutates every ticked target. Confirm
+        // before running so a stray click can't push a stored procedure
+        // to PROD. Mirrors the Batch screen's confirm dialog so the
+        // single-execution path is held to the same safety standard.
+        // Object name + target count + ALTER/CREATE warning are spelled
+        // out so the user sees the blast radius before saying yes.
+        var targetsLabel = checkedTargets.Count == 1 ? "target" : "targets";
+        var targetSummary = checkedTargets.Count <= 3
+            ? string.Join(", ", checkedTargets.Select(t => $"{t.Environment}/{t.Database}"))
+            : $"{checkedTargets.Count} {targetsLabel}";
+        var confirmed = await ConfirmDialog.AskAsync(
+            title:       "Execute sync?",
+            message:     $"This will sync '{ObjectName!.Trim()}' from " +
+                         $"{sourceLabel} to {targetSummary}. " +
+                         $"Existing objects will be ALTERED; missing ones will be CREATED. Continue?",
+            primaryText: "Execute",
+            cancelText:  "Cancel");
+        if (!confirmed)
+        {
+            Status = "Execute cancelled.";
             return;
         }
 
-        // Build the DACPAC exporter once per run so we don't re-read the
-        // config file for each target.
-        var exporter      = await _svc.TryBuildDacpacExporterAsync();
+        // DACPAC export doesn't apply when source is a snapshot — the
+        // snapshot already IS the stored copy, no need to re-serialise.
+        var exporter = SourceMode == BatchSourceMode.Snapshot
+            ? null
+            : await _svc.TryBuildDacpacExporterAsync();
         var exportedPaths = new List<string>();
         bool anyTargetSucceeded = false;
 
@@ -583,18 +828,23 @@ public sealed partial class SyncViewModel : ObservableObject
             // it exactly once here and pass captureSourceBackup=false
             // through the loop so the source folder doesn't accumulate
             // N identical copies.
+            // In snapshot mode there's no live source to back up — the
+            // snapshot is itself the persisted copy.
             var runStamp = Base.It.Core.Backup.FileBackupStore.NewRunStamp();
             string? sourceBackupPath = null;
-            try
+            if (SourceMode == BatchSourceMode.Live)
             {
-                var srcOutcome = await _svc.Backup.BackupAsync(
-                    srcConn!, SourceEnv!, id,
-                    role: Base.It.Core.Backup.BackupRole.Source,
-                    runStamp: runStamp);
-                if (srcOutcome.Kind == Base.It.Core.Backup.BackupOutcomeKind.Written)
-                    sourceBackupPath = srcOutcome.FilePath;
+                try
+                {
+                    var srcOutcome = await _svc.Backup.BackupAsync(
+                        srcConn!, SourceEnv!, id,
+                        role: Base.It.Core.Backup.BackupRole.Source,
+                        runStamp: runStamp);
+                    if (srcOutcome.Kind == Base.It.Core.Backup.BackupOutcomeKind.Written)
+                        sourceBackupPath = srcOutcome.FilePath;
+                }
+                catch { /* best-effort — sync continues even if the pre-capture failed */ }
             }
-            catch { /* best-effort — sync continues even if the pre-capture failed */ }
 
             foreach (var t in checkedTargets)
             {
@@ -606,11 +856,27 @@ public sealed partial class SyncViewModel : ObservableObject
                 }
                 try
                 {
-                    var r = await _svc.Sync.SyncAsync(
-                        srcConn!, tgtConn!, id, SourceEnv!, t.Environment,
-                        ct: default, zipPair: true,
-                        captureSourceBackup: false,
-                        runStamp: runStamp);
+                    Base.It.Core.Sync.SyncResult r;
+                    if (SourceMode == BatchSourceMode.Snapshot)
+                    {
+                        // Snapshot path: apply the pre-fetched SqlObject.
+                        // No live source connection is touched.
+                        r = await _svc.Sync.SyncFromDefinitionAsync(
+                            tgtConn!, snapshotSource!,
+                            sourceLabel: sourceLabel,
+                            targetEnv:   t.Environment,
+                            ct:          default,
+                            zipPair:     true,
+                            runStamp:    runStamp);
+                    }
+                    else
+                    {
+                        r = await _svc.Sync.SyncAsync(
+                            srcConn!, tgtConn!, id, SourceEnv!, t.Environment,
+                            ct: default, zipPair: true,
+                            captureSourceBackup: false,
+                            runStamp: runStamp);
+                    }
                     switch (r.Status)
                     {
                         case SyncStatus.Success:
@@ -743,52 +1009,117 @@ public sealed partial class SyncViewModel : ObservableObject
     /// the preview window keeps working even after the source / target pick
     /// changes underneath it.
     /// </summary>
-    public BatchPreviewViewModel? BuildPreview()
+    public async Task<BatchPreviewViewModel?> BuildPreviewAsync()
     {
         if (string.IsNullOrWhiteSpace(SourceEnv) || string.IsNullOrWhiteSpace(SourceDatabase)) return null;
         if (string.IsNullOrWhiteSpace(ObjectName)) return null;
 
-        var endpoints = new List<PreviewEndpoint>();
+        // Targets are always live — Sync writes to live DBs. Build the
+        // target endpoint list once and share it across both source
+        // branches below.
+        var targetEndpoints = new List<PreviewEndpoint>();
+        foreach (var t in Targets.Where(t => t.IsChecked))
+        {
+            var tgtConn = _svc.Connections.Get(t.Environment, t.Database) ?? "";
+            var profile = _svc.Connections.GetProfile(t.Environment, t.Database);
+            targetEndpoints.Add(new PreviewEndpoint(
+                Label:            $"Target · {t.Environment} / {t.Database}",
+                Color:            profile?.Color,
+                ConnectionString: tgtConn));
+        }
+        if (targetEndpoints.Count == 0) return null;  // source-only preview is pointless
 
+        // Snapshot source → pull the literal SQL from the local schema
+        // store and use ForFileAndTargets (same pattern Batch uses).
+        // Skips the live-source fetch entirely so a "Snapshot of PROD"
+        // source can drive a preview even when live PROD is unreachable.
+        if (SourceMode == BatchSourceMode.Snapshot
+            && !string.IsNullOrWhiteSpace(SourceSnapshotId))
+        {
+            try
+            {
+                var store = _svc.OpenSchemaStore(SourceEnv!, SourceDatabase!);
+                var snap  = await store.ReadSnapshotAsync(SourceSnapshotId!);
+                var entry = snap?.Entries.FirstOrDefault(e =>
+                    string.Equals(e.FullName, ObjectName!.Trim(), StringComparison.OrdinalIgnoreCase));
+                var sql = entry is null ? null : await store.ReadObjectAsync(entry.Hash);
+                var snapLabel = string.IsNullOrWhiteSpace(SourceSnapshotDisplayName)
+                    ? "snapshot"
+                    : SourceSnapshotDisplayName;
+                var sourceText = string.IsNullOrWhiteSpace(sql)
+                    ? $"-- '{ObjectName}' is not present in the selected snapshot."
+                    : sql!;
+                return BatchPreviewViewModel.ForFileAndTargets(
+                    svc:         _svc,
+                    sourceLabel: $"Source · {SourceEnv} / {SourceDatabase} @ {snapLabel}",
+                    fileContent: sourceText,
+                    objectName:  ObjectName!.Trim(),
+                    targets:     targetEndpoints);
+            }
+            catch
+            {
+                // Fall through to live-source path so the user at least sees
+                // target panes if the snapshot read failed.
+            }
+        }
+
+        // Live source path — original behaviour.
+        var endpoints = new List<PreviewEndpoint>();
         var srcConn = _svc.Connections.Get(SourceEnv!, SourceDatabase!) ?? "";
         endpoints.Add(new PreviewEndpoint(
             Label:            $"Source · {SourceEnv} / {SourceDatabase}",
             Color:            SourceProfile?.Color,
             ConnectionString: srcConn));
-
-        foreach (var t in Targets.Where(t => t.IsChecked))
-        {
-            var tgtConn = _svc.Connections.Get(t.Environment, t.Database) ?? "";
-            var profile = _svc.Connections.GetProfile(t.Environment, t.Database);
-            endpoints.Add(new PreviewEndpoint(
-                Label:            $"Target · {t.Environment} / {t.Database}",
-                Color:            profile?.Color,
-                ConnectionString: tgtConn));
-        }
-
-        if (endpoints.Count < 2) return null; // source-only preview is pointless
-
-        return new BatchPreviewViewModel(_svc, ObjectName.Trim(), endpoints);
+        endpoints.AddRange(targetEndpoints);
+        return new BatchPreviewViewModel(_svc, ObjectName!.Trim(), endpoints);
     }
 
     /// <summary>
-    /// Preview command — opens the same diff window Batch uses with the
-    /// current source + ticked targets for <see cref="ObjectName"/>. Pure
-    /// read; no execution. Wired from the view's code-behind, which owns
-    /// the Window instance.
+    /// Inline preview state, bound to the embedded PaneDiffView on the
+    /// Sync screen. Setting this triggers the view to re-render its panes
+    /// (via PaneDiffView's DataContextChanged → Bind path). Null hides
+    /// the inline section entirely.
+    /// </summary>
+    [ObservableProperty] private BatchPreviewViewModel? _preview;
+
+    /// <summary>True when there's a live inline preview to display.</summary>
+    public bool HasInlinePreview => Preview is not null;
+
+    partial void OnPreviewChanged(BatchPreviewViewModel? value)
+        => OnPropertyChanged(nameof(HasInlinePreview));
+
+    /// <summary>
+    /// Compare command — builds an inline preview (source + every ticked
+    /// target) and runs the load so panes render side-by-side on the Sync
+    /// screen itself. Replaces the old per-row "Preview" button, which
+    /// opened a separate window: the user wanted the comparison and the
+    /// sync action on the same screen.
     /// </summary>
     [RelayCommand]
-    private void Preview()
+    private async Task CompareAsync()
     {
-        var preview = BuildPreview();
+        var preview = await BuildPreviewAsync();
         if (preview is null)
         {
-            _svc.Toasts.Warning("Nothing to preview", "Pick source, type an object name, and tick at least one target.");
+            _svc.Toasts.Warning("Nothing to compare",
+                "Pick source, type an object name, and tick at least one target.");
             return;
         }
-        PreviewRequested?.Invoke(preview);
+        Preview = preview;
+        // Kick the load so panes actually populate. PaneDiffView reacts
+        // to the resulting Panes.CollectionChanged and re-renders.
+        await preview.LoadAsync();
     }
 
-    /// <summary>Raised when <see cref="PreviewCommand"/> wants the host view to open a preview window.</summary>
+    /// <summary>
+    /// Synchronous wrapper kept for backwards compatibility with the
+    /// PreviewRequested event subscribers (if any external view still
+    /// expects to open the standalone window). New code should call
+    /// CompareCommand instead, which renders inline.
+    /// </summary>
+    public BatchPreviewViewModel? BuildPreview()
+        => BuildPreviewAsync().GetAwaiter().GetResult();
+
+    /// <summary>Legacy event — kept so the existing SyncView code-behind that opens BatchPreviewWindow doesn't break compilation. The inline merge supersedes it.</summary>
     public event Action<BatchPreviewViewModel>? PreviewRequested;
 }

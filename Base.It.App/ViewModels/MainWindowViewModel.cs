@@ -17,6 +17,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public ScriptsViewModel   Scripts   { get; }
     public QueryViewModel     Query     { get; }
     public WatchViewModel     Watch     { get; }
+    public SnapshotsViewModel Snapshots { get; }
     public SettingsViewModel  Settings  { get; }
 
     public bool HasAnyConnection => Services.Connections.Load().Count > 0;
@@ -54,6 +55,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Scripts  = new ScriptsViewModel(Services);
         Query    = new QueryViewModel(Services);
         Watch    = new WatchViewModel(Services);
+        Snapshots = new SnapshotsViewModel(Services);
         Settings = new SettingsViewModel(Services);
         Home     = new HomeViewModel(Services);
         Home.NavigateRequested += tag => NavigateToTagRequested?.Invoke(tag);
@@ -83,6 +85,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _ = Sync.RefreshDacpacAvailabilityAsync();
             _ = Watch.RefreshDacpacAvailabilityAsync();
             Query.Reload();
+            Snapshots.Reload();
             Home.Refresh();
             OnPropertyChanged(nameof(HasAnyConnection));
         };
@@ -101,9 +104,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
             Batch.Reload();
             Scripts.Reload();
             Query.Reload();
+            Snapshots.Reload();
         };
 
         Watch.SendToBatchRequested += payload =>
+        {
+            _ = HandleSendToBatchAsync(payload);
+        };
+
+        // Cross-store promote: the Snapshots tab raises the same
+        // payload shape, so we route it through the existing handoff
+        // dialog (replace main / new window / cancel). Snapshots'
+        // payload always has exactly one entry in Targets — the TO
+        // side of the cross-store diff.
+        Snapshots.SendToBatchRequested += payload =>
         {
             _ = HandleSendToBatchAsync(payload);
         };

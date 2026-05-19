@@ -54,7 +54,8 @@ public partial class WatchView : UserControl
     {
         var owner = TopLevel.GetTopLevel(this) as Window;
         var win = new BatchPreviewWindow { DataContext = preview };
-        if (owner is not null) win.ShowDialog(owner);
+        // Non-modal — see BatchView.OnPreviewClick for the rationale.
+        if (owner is not null) win.Show(owner);
         else                   win.Show();
     }
 }

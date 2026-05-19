@@ -4,6 +4,18 @@
              x:Class="Base.It.App.Views.WatchView"
              x:DataType="vm:WatchViewModel">
 
+    <UserControl.Styles>
+        <!-- Watch-group rows: the name is red ONLY when the group has
+             detected changes. In the default (no-changes) state the
+             TextBlock inherits the theme-aware Foreground from
+             PageStyles.axaml, so it reads correctly in both dark and
+             light mode. The earlier hard-coded "#FFFFFF" default was
+             invisible on a light background. -->
+        <Style Selector="TextBlock.hasChanges">
+            <Setter Property="Foreground" Value="#E53935"/>
+        </Style>
+    </UserControl.Styles>
+
     <Grid RowDefinitions="*,Auto" ColumnDefinitions="260,*">
 
         <!-- LEFT: groups list -->
@@ -26,7 +38,7 @@
                                              Fill="{Binding DotBrush}"/>
                                     <TextBlock Grid.Column="1"
                                                Text="{Binding Display}"
-                                               Foreground="{Binding NameBrush}"
+                                               Classes.hasChanges="{Binding HasChanges}"
                                                VerticalAlignment="Center"
                                                FontSize="12"
                                                TextTrimming="CharacterEllipsis"/>
@@ -133,7 +145,9 @@
                                                                 Click="OnPreviewClick" Tag="{Binding}"
                                                                 VerticalAlignment="Center" HorizontalAlignment="Center"
                                                                 ToolTip.Tip="Preview this row's source + every target's CREATE definition. Pure read; nothing is executed.">
-                                                            <TextBlock Text="👁" FontSize="12"/>
+                                                            <TextBlock Text="&#xE890;"
+                                                                       FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                                       FontSize="13"/>
                                                         </Button>
                                                         <TextBlock Grid.Column="2" Text="{Binding ObjectName}"
                                                                    VerticalAlignment="Center"

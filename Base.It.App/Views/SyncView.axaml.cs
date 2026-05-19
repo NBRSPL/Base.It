@@ -5,7 +5,11 @@ using Base.It.App.ViewModels;
 
 namespace Base.It.App.Views;
 
-public partial class SyncView : UserControl, ISupportsFind
+// Intentionally does NOT implement ISupportsFind: Ctrl+F used to set
+// the Sync target filter, which surprised users who expected the
+// OS-standard "find in page" behaviour. The target filter has its
+// own visible textbox; Ctrl+F stays separate.
+public partial class SyncView : UserControl
 {
     private SyncViewModel? _hookedVm;
 
@@ -23,7 +27,7 @@ public partial class SyncView : UserControl, ISupportsFind
         if (sender is AutoCompleteBox box) box.IsDropDownOpen = true;
     }
 
-    /// <summary>Source chevron — focus + open the dropdown.</summary>
+    /// <summary>Source chevron — focus + open the dropdown so every source candidate shows.</summary>
     private void OnSourceChevronClick(object? sender, RoutedEventArgs e)
     {
         var box = this.FindControl<AutoCompleteBox>("SourceBox");
@@ -69,11 +73,31 @@ public partial class SyncView : UserControl, ISupportsFind
 
     private void WireSourceFilter()
     {
-        // Same filter shape on both pickers — consistent UX with Batch.
+        // Source side lists BatchSourceItem (live + snapshot mixed);
+        // target side still lists plain EndpointPick. Matches Batch's
+        // exact filter wiring so source/target behaviour is identical.
         var src = this.FindControl<AutoCompleteBox>("SourceBox");
         var tgt = this.FindControl<AutoCompleteBox>("TargetAddBox");
-        if (src is not null) src.ItemFilter = EndpointFilter;
+        if (src is not null) src.ItemFilter = SourceItemFilter;
         if (tgt is not null) tgt.ItemFilter = EndpointFilter;
+    }
+
+    /// <summary>
+    /// Filter for the source picker. Matches the combined label (which
+    /// includes "@ snapshot …" for snapshot rows) plus the underlying
+    /// env / db so users can find either kind by typing any fragment.
+    /// Copied verbatim from BatchView so both screens behave identically.
+    /// </summary>
+    private static bool SourceItemFilter(string? search, object? item)
+    {
+        if (item is not BatchSourceItem s) return false;
+        if (string.IsNullOrEmpty(search)) return true;
+        var q = search!.Trim();
+        return s.Label.Contains(q, System.StringComparison.OrdinalIgnoreCase)
+            || s.SubLabel.Contains(q, System.StringComparison.OrdinalIgnoreCase)
+            || s.Endpoint.Environment.Contains(q, System.StringComparison.OrdinalIgnoreCase)
+            || s.Endpoint.Database.Contains(q, System.StringComparison.OrdinalIgnoreCase)
+            || (s.IsSnapshot && "snapshot".Contains(q, System.StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool EndpointFilter(string? search, object? item)
@@ -85,16 +109,6 @@ public partial class SyncView : UserControl, ISupportsFind
             || p.Environment.Contains(s, System.StringComparison.OrdinalIgnoreCase)
             || p.Database.Contains(s, System.StringComparison.OrdinalIgnoreCase);
     }
-
-    /// <summary>ISupportsFind: maps the global find overlay to the Sync target filter.</summary>
-    public void ApplyFind(string? text)
-    {
-        if (DataContext is not SyncViewModel vm) return;
-        vm.TargetFilter = text ?? string.Empty;
-    }
-
-    public string CurrentFindText
-        => (DataContext as SyncViewModel)?.TargetFilter ?? string.Empty;
 
     /// <summary>
     /// Subscribe to the VM's preview request so the view can own the Window
@@ -122,7 +136,8 @@ public partial class SyncView : UserControl, ISupportsFind
     {
         var owner = TopLevel.GetTopLevel(this) as Window;
         var win = new BatchPreviewWindow { DataContext = preview };
-        if (owner is not null) win.ShowDialog(owner);
+        // Non-modal — see BatchView.OnPreviewClick for the rationale.
+        if (owner is not null) win.Show(owner);
         else                   win.Show();
     }
 }

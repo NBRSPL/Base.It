@@ -23,12 +23,16 @@
 
             <ui:NavigationView.MenuItems>
                 <ui:NavigationViewItem Content="Home"    Tag="Home"    IconSource="Home"/>
-                <ui:NavigationViewItem Content="Compare" Tag="Compare" IconSource="AllApps"/>
+                <!-- Compare nav entry retired — the Sync screen now shows the
+                     same diff panes inline (via PaneDiffView) when you click
+                     its Compare button. The old CompareView / Compare* VMs
+                     still exist but are no longer reachable from the nav. -->
                 <ui:NavigationViewItem Content="Sync"    Tag="Sync"    IconSource="Sync"/>
                 <ui:NavigationViewItem Content="Batch"   Tag="Batch"   IconSource="List"/>
                 <ui:NavigationViewItem Content="Scripts" Tag="Scripts" IconSource="Document"/>
                 <ui:NavigationViewItem Content="Query"   Tag="Query"   IconSource="Find"/>
-                <ui:NavigationViewItem Content="Watch"   Tag="Watch"   IconSource="View"/>
+                <ui:NavigationViewItem Content="Watch"     Tag="Watch"     IconSource="View"/>
+                <ui:NavigationViewItem Content="Snapshots" Tag="Snapshots" IconSource="Save"/>
             </ui:NavigationView.MenuItems>
 
             <ui:NavigationView.FooterMenuItems>
@@ -79,17 +83,45 @@
 
             <Grid RowDefinitions="Auto,*" Margin="12,40,12,12">
 
-                <!-- Top bar: fetch dock on the left, active-group picker on the
-                     right (theme toggle is in the nav pane footer now). -->
-                <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,10">
-                    <v:FetchDockView Grid.Column="0" DataContext="{Binding FetchDock}"/>
+                <!-- Top bar: version pill (top-left) · fetch dock · group
+                     picker (right). The pill is compact (icon + "v1.2.0"
+                     only, no stretching) so it doesn't eat space the
+                     fetch dock can use. Click jumps to Settings — the
+                     user can scroll to the Updates expander. -->
+                <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto" Margin="0,0,0,10">
+                    <Button Grid.Column="0" x:Name="VersionPillBtn"
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Left"
+                            Background="Transparent"
+                            BorderBrush="{DynamicResource App.StrokeBrush}"
+                            BorderThickness="1"
+                            CornerRadius="10"
+                            Padding="8,2"
+                            MinHeight="0" MinWidth="0"
+                            Margin="0,0,8,0"
+                            ToolTip.Tip="Current app version — click to open Settings → Updates"
+                            Click="OnVersionPillClick">
+                        <StackPanel Orientation="Horizontal" Spacing="4"
+                                    VerticalAlignment="Center">
+                            <TextBlock Text="&#xE895;"
+                                       FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                       FontSize="10" Opacity="0.7"
+                                       VerticalAlignment="Center"/>
+                            <TextBlock x:Name="VersionPillText"
+                                       Text="{Binding Services.Updater.CurrentVersion, StringFormat='v{0}', FallbackValue='version'}"
+                                       FontSize="10" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource App.TextSecondaryBrush}"
+                                       VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <v:FetchDockView Grid.Column="1" DataContext="{Binding FetchDock}"/>
 
                     <!-- Connection-group picker: searchable AutoCompleteBox.
                          "All connections" sits at the top of the list and
                          clears the filter; type-to-search filters by group
                          name. MinimumPrefixLength=0 so a single click opens
                          the dropdown without typing first. -->
-                    <Border x:Name="GroupSelector" Grid.Column="1" Margin="6,0,0,0"
+                    <Border x:Name="GroupSelector" Grid.Column="2" Margin="6,0,0,0"
                             VerticalAlignment="Center">
                         <AutoCompleteBox Width="220" MinHeight="30"
                                          ItemsSource="{Binding ConnectionGroupOptions}"

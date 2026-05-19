@@ -1,28 +1,30 @@
 namespace Base.It.App.Views;
 
 /// <summary>
-/// Implemented by views that have a "find / filter" surface on their
-/// pane. Drives the window-level Ctrl+F overlay: pressing Ctrl+F opens
-/// a small floating find box (browser-style); typing into it calls
-/// <see cref="ApplyFind"/> on the active view; closing the overlay
-/// (Esc / X) clears the filter by calling <see cref="ApplyFind"/>
-/// with an empty string.
+/// Implemented by views that have a visible search/filter textbox on
+/// their page. Ctrl+F at the window level routes here so the keyboard
+/// shortcut just focuses that existing textbox — no hidden overlay,
+/// no parallel "find" state that silently mirrors the visible filter.
 ///
-/// Modelled on the browser's Ctrl+F: the find box is a transient piece
-/// of chrome the window owns, not a permanent input on the page.
+/// Earlier the contract was an <c>ApplyFind(string)</c> that piped text
+/// from a popup overlay into the page's filter property. That made
+/// Ctrl+F and the visible filter textbox appear to be two separate
+/// inputs while actually editing the same backing field — confusing.
+/// The new shape exposes a single action: "put keyboard focus on this
+/// page's filter textbox" — the textbox itself is the only search UI.
 /// </summary>
 public interface ISupportsFind
 {
     /// <summary>
-    /// Apply (or clear, when <paramref name="text"/> is null/empty) the
-    /// pane's find/filter expression. Implementations should be
-    /// idempotent and cheap — typing fires this once per keystroke.
+    /// Focus this page's visible filter / search textbox so the user
+    /// can start typing immediately. No-op (and no <c>Handled</c>) if
+    /// the page doesn't currently have a focusable filter (e.g. nothing
+    /// is selected yet that would expose one).
     /// </summary>
-    void ApplyFind(string? text);
-
-    /// <summary>
-    /// Current find expression, used to pre-populate the overlay when it
-    /// reopens (so users see what was last typed, can Esc / X to clear).
-    /// </summary>
-    string CurrentFindText { get; }
+    /// <returns>
+    /// <c>true</c> if focus was placed on a textbox, <c>false</c>
+    /// otherwise. Callers can use the return to decide whether to
+    /// fall through to a different Ctrl+F handler.
+    /// </returns>
+    bool FocusFindBox();
 }

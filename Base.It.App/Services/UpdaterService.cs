@@ -63,7 +63,13 @@ public sealed partial class UpdaterService : ObservableObject
             var src = new GithubSource(ReleasesRepo, accessToken: null, prerelease: false);
             _um = new UpdateManager(src);
 
-            CurrentVersion = _um.CurrentVersion?.ToString() ?? "";
+            // Velopack only knows CurrentVersion once the app is installed
+            // through it. Dev builds (dotnet run) get null here, which
+            // would make the version pill in MainWindow show blank. Fall
+            // back to the assembly's informational version so the pill
+            // always has SOMETHING to display, even in dev. The csproj's
+            // <Version> tag flows into that attribute at build time.
+            CurrentVersion = _um.CurrentVersion?.ToString() ?? GetAssemblyVersion();
             State = _um.IsInstalled ? UpdateState.Idle : UpdateState.NotInstalled;
         }
         catch (Exception ex)
@@ -71,7 +77,37 @@ public sealed partial class UpdaterService : ObservableObject
             _um = null;
             State = UpdateState.NotInstalled;
             LastError = ex.Message;
+            // Even on Velopack init failure we want a version number to
+            // show in the pill — fall back to the assembly's stamped
+            // version. Done last so the constructor doesn't double-set
+            // CurrentVersion on the happy path.
+            if (string.IsNullOrEmpty(CurrentVersion))
+                CurrentVersion = GetAssemblyVersion();
         }
+    }
+
+    /// <summary>
+    /// Reads the assembly's informational version (which the csproj's
+    /// <c>&lt;Version&gt;</c> tag flows into at build time). Used as a
+    /// fallback when Velopack's <c>UpdateManager.CurrentVersion</c> is
+    /// null (dev builds running via <c>dotnet run</c>).
+    /// </summary>
+    private static string GetAssemblyVersion()
+    {
+        var asm = System.Reflection.Assembly.GetExecutingAssembly();
+        var info = asm.GetCustomAttributes(
+                typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+            .FirstOrDefault()?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(info))
+        {
+            // Strip any "+commit-sha" suffix MSBuild appends; we only
+            // want the human "1.2.0" part.
+            var plus = info!.IndexOf('+');
+            return plus < 0 ? info! : info!.Substring(0, plus);
+        }
+        var v = asm.GetName().Version;
+        return v is null ? "" : $"{v.Major}.{v.Minor}.{v.Build}";
     }
 
     /// <summary>

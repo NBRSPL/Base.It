@@ -6,6 +6,7 @@ using Base.It.Core.Drift;
 using Base.It.Core.Logging;
 using Base.It.Core.Models;
 using Base.It.Core.Query;
+using Base.It.Core.Schema;
 using Base.It.Core.Sql;
 using Base.It.Core.Sync;
 
@@ -47,6 +48,15 @@ public sealed class AppServices
 
     // DACPAC export.
     public DacpacExportStore DacpacOptions { get; }
+
+    /// <summary>
+    /// Root folder for the content-addressable schema-store family. Each
+    /// (environment, database) gets a subfolder created lazily when its
+    /// store is first opened via <see cref="OpenSchemaStore"/>. Lives
+    /// under <see cref="UserDataRoot"/>\Schemas so it travels with the
+    /// rest of the user data.
+    /// </summary>
+    public string SchemaStoreRoot { get; }
 
     /// <summary>Raised after the active connection group changes so VMs can re-pull filtered environment lists.</summary>
     public event Action? ActiveConnectionGroupChanged;
@@ -114,6 +124,9 @@ public sealed class AppServices
         ConnectionGroups = new ConnectionGroupStore(Path.Combine(UserDataRoot, "connectiongroups.json"));
 
         DacpacOptions = new DacpacExportStore(Path.Combine(UserDataRoot, "dacpac.json"));
+
+        SchemaStoreRoot = Path.Combine(UserDataRoot, "Schemas");
+        Directory.CreateDirectory(SchemaStoreRoot);
 
         // UI services — theme + toasts. AppSettings was constructed earlier
         // (above) so the backup-root lookup could use it. Theme loads the
@@ -282,6 +295,22 @@ public sealed class AppServices
             SqlProjUpdater.EnsureBuildIncludes(exporter.Options.RootFolder, pathSrc);
         return new DacpacExportResult(pathSrc, existedSrc);
     }
+
+    /// <summary>
+    /// Open the schema store for a specific (env, db) pair. Idempotent —
+    /// safe to call repeatedly. Creates the on-disk folders lazily so the
+    /// first snapshot for a brand-new endpoint Just Works.
+    /// </summary>
+    public SchemaStore OpenSchemaStore(string environment, string database)
+        => new(SchemaStoreRoot, environment, database);
+
+    /// <summary>
+    /// Convenience wrapper: instantiate a snapshotter pre-wired to the
+    /// (env, db)'s store and the shared scripter. Caller passes the
+    /// connection string to <see cref="SchemaSnapshotter.SnapshotAsync"/>.
+    /// </summary>
+    public SchemaSnapshotter OpenSnapshotter(string environment, string database)
+        => new(OpenSchemaStore(environment, database));
 
     public ChangeWatcher CreateWatcher(
         TimeSpan interval,

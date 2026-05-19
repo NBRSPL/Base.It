@@ -192,7 +192,6 @@ public sealed partial class WatchGroupItemVm : ObservableObject
         OnPropertyChanged(nameof(Group));
         OnPropertyChanged(nameof(Display));
         OnPropertyChanged(nameof(DotBrush));
-        OnPropertyChanged(nameof(NameBrush));
     }
 
     /// <summary>Route segment: src→T1, T2… capped for readability in narrow sidebars.</summary>
@@ -216,9 +215,13 @@ public sealed partial class WatchGroupItemVm : ObservableObject
     }
 
     public string DotBrush   => HasChanges ? "#E53935" : (Group.Enabled ? "#4CAF50" : "#9E9E9E");
-    public string NameBrush  => HasChanges ? "#E53935" : "#FFFFFF";
+    // NameBrush removed — the "has changes = red name" state is now
+    // driven by Classes.hasChanges in WatchView.axaml so the default
+    // text colour can inherit theme-aware Foreground from PageStyles.
+    // (Earlier this returned "#FFFFFF" for the default case, which was
+    // invisible on the light theme's near-white background.)
 
-    partial void OnHasChangesChanged(bool value)  { OnPropertyChanged(nameof(Display)); OnPropertyChanged(nameof(DotBrush)); OnPropertyChanged(nameof(NameBrush)); }
+    partial void OnHasChangesChanged(bool value)  { OnPropertyChanged(nameof(Display)); OnPropertyChanged(nameof(DotBrush)); }
     partial void OnChangedCountChanged(int value) => OnPropertyChanged(nameof(Display));
     partial void OnErrorCountChanged(int value)   => OnPropertyChanged(nameof(Display));
 }

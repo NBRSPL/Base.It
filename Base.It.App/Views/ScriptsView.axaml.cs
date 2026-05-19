@@ -121,7 +121,8 @@ public partial class ScriptsView : UserControl
             title:    item.FileName,
             subtitle: $"Failed — row #{item.Index}",
             body:     item.Message);
-        if (owner is not null) win.ShowDialog(owner);
+        // Non-modal — see BatchView.OnViewErrorClick for the rationale.
+        if (owner is not null) win.Show(owner);
         else                   win.Show();
     }
 
@@ -143,7 +144,8 @@ public partial class ScriptsView : UserControl
     {
         var owner = TopLevel.GetTopLevel(this) as Window;
         var win = new BatchPreviewWindow { DataContext = preview };
-        if (owner is not null) win.ShowDialog(owner);
+        // Non-modal — see BatchView.OnPreviewClick for the rationale.
+        if (owner is not null) win.Show(owner);
         else                   win.Show();
     }
 

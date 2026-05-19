@@ -243,29 +243,48 @@ ORDER BY schema_name, o.name";
     public async Task<SqlObject?> GetObjectAsync(
         string connectionString, ObjectIdentifier id, CancellationToken ct = default)
     {
-        // Default fetch path: lightweight column-only table script, used
-        // for drift detection / compare / ad-hoc fetching. Callers that
-        // specifically need a DACPAC-ready definition should go through
-        // GetObjectForDacpacAsync instead.
+        // Tables now route through the constraint-aware DACPAC path so
+        // preview / diff / sync / drift all see the full table definition
+        // (columns + identity + defaults + computed + PK / UQ / CHECK /
+        // FK / indexes / triggers). The old column-only path was producing
+        // round-tripped tables that silently dropped every constraint.
+        // ScriptTableSimpleAsync is kept around behind a separate entry
+        // point for callers that explicitly want the lightweight read.
         var type = await GetObjectTypeAsync(connectionString, id, ct);
         if (type == SqlObjectType.Unknown) return null;
 
         string definition = type == SqlObjectType.Table
-            ? await ScriptTableSimpleAsync(connectionString, id, ct)
+            ? await ScriptTableForDacpacAsync(connectionString, id, ct)
             : await GetModuleDefinitionAsync(connectionString, id, ct);
 
         if (string.IsNullOrWhiteSpace(definition)) return null;
         return new SqlObject(id, type, definition, DefinitionHasher.Hash(definition));
     }
 
-    public async Task<SqlObject?> GetObjectForDacpacAsync(
+    /// <summary>
+    /// Same as <see cref="GetObjectAsync"/> today. Kept as a stable public
+    /// entry point for callers that semantically want the DACPAC-shaped
+    /// definition (the DACPAC export flow). Both call sites end up at the
+    /// same constraint-aware scripter now.
+    /// </summary>
+    public Task<SqlObject?> GetObjectForDacpacAsync(
+        string connectionString, ObjectIdentifier id, CancellationToken ct = default)
+        => GetObjectAsync(connectionString, id, ct);
+
+    /// <summary>
+    /// Lightweight column-only fetch — kept as an internal helper for the
+    /// (rare) callers that intentionally want JUST the column shape, not
+    /// the full constraint-aware definition. The default
+    /// <see cref="GetObjectAsync"/> path no longer uses this.
+    /// </summary>
+    public async Task<SqlObject?> GetObjectColumnsOnlyAsync(
         string connectionString, ObjectIdentifier id, CancellationToken ct = default)
     {
         var type = await GetObjectTypeAsync(connectionString, id, ct);
         if (type == SqlObjectType.Unknown) return null;
 
         string definition = type == SqlObjectType.Table
-            ? await ScriptTableForDacpacAsync(connectionString, id, ct)
+            ? await ScriptTableSimpleAsync(connectionString, id, ct)
             : await GetModuleDefinitionAsync(connectionString, id, ct);
 
         if (string.IsNullOrWhiteSpace(definition)) return null;
@@ -394,14 +413,11 @@ WHERE tr.name = @name
     }
 
     /// <summary>
-    /// Produces a DACPAC/SSDT-shaped definition for a table: a full
-    /// <c>CREATE TABLE</c> with columns, identity, defaults, computed
-    /// columns, inline PK/UQ/CHECK constraints, followed by <c>CREATE
-    /// INDEX</c> for every non-PK/UQ index, <c>ALTER TABLE ADD CONSTRAINT</c>
-    /// for every foreign key, and a trailing <c>CREATE TRIGGER</c> block
-    /// for each trigger bound to the table. Each top-level statement is
-    /// separated by a <c>GO</c> batch terminator so the file can be
-    /// executed directly against SQL Server.
+    /// Produces a DACPAC/SSDT-shaped definition for a table by loading
+    /// every catalog dependency from one connection and delegating the
+    /// SQL emission to <see cref="TableScriptRenderer"/>. The renderer is
+    /// shared with the bulk snapshot fetcher so the on-disk shape is
+    /// identical regardless of which path produced it.
     /// </summary>
     private static async Task<string> ScriptTableForDacpacAsync(
         string connectionString, ObjectIdentifier id, CancellationToken ct)
@@ -411,7 +427,7 @@ WHERE tr.name = @name
 
         // Header (real casing + filegroup) and DB collation are read up
         // front so the body rendering can use them.
-        var header     = await LoadTableHeaderAsync(conn, id, ct);
+        var header      = await LoadTableHeaderAsync(conn, id, ct);
         if (header is null) return string.Empty;
         var dbCollation = await LoadDatabaseCollationAsync(conn, ct);
 
@@ -423,50 +439,27 @@ WHERE tr.name = @name
         var checkCons = await LoadCheckConstraintsAsync(conn, id, ct);
         var fkeys     = await LoadForeignKeysAsync(conn, id, ct);
         var indexes   = await LoadIndexesAsync(conn, id, ct);
-        var triggers  = await LoadTriggersAsync(conn, id, ct);
 
-        // Use the real catalog name in the header so case matches the
-        // database rather than whatever was typed into the Watch group.
-        var realId = new ObjectIdentifier(header.Value.Schema, header.Value.Name);
+        // Triggers stay as first-class objects: the bulk snapshot fetcher
+        // captures them as type='TR', and the merged Sync screen / preview
+        // shows them in their own pane. Embedding them inline in a table's
+        // CREATE script would (a) duplicate them in the on-disk
+        // representation, and (b) make a Compare diff on a table noisy
+        // with trigger source. The Snapshots screen surfaces them as a
+        // "Triggers on this table" sidebar instead. Pass an empty list.
+        var triggers = Array.Empty<(string, string, string)>();
 
-        // Column alignment — SSDT-style: pad [Name] and type-spec columns
-        // to their max width so everything after lines up cleanly.
-        var nameField = columns.Select(c => $"[{c.Name}]").ToList();
-        var typeField = columns.Select(c => RenderTypeSpec(c)).ToList();
-        var maxName   = nameField.Max(s => s.Length);
-        var maxType   = typeField.Max(s => s.Length);
-
-        var sb = new System.Text.StringBuilder(capacity: 1024);
-
-        // --- CREATE TABLE body: columns + inline PK/UQ/CHECK lines. -----
-        sb.Append("CREATE TABLE [").Append(realId.Schema).Append("].[").Append(realId.Name).Append("] (\n");
-        var bodyLines = new List<string>(columns.Count + keyCons.Count + checkCons.Count);
-        for (int i = 0; i < columns.Count; i++)
-            bodyLines.Add(RenderColumn(columns[i], nameField[i], typeField[i], maxName, maxType, dbCollation));
-        foreach (var k in keyCons)   bodyLines.Add(RenderKeyConstraint(k));
-        foreach (var c in checkCons) bodyLines.Add(RenderCheckConstraint(c));
-        sb.Append(string.Join(",\n", bodyLines));
-        sb.Append("\n)");
-        if (!string.Equals(header.Value.Filegroup, "PRIMARY", StringComparison.OrdinalIgnoreCase))
-            sb.Append(" ON [").Append(header.Value.Filegroup).Append(']');
-        sb.Append(";\nGO\n");
-
-        // --- Non-PK/UQ indexes as CREATE INDEX. -------------------------
-        foreach (var ix in indexes)
-            sb.Append(RenderIndex(ix, realId)).Append("GO\n");
-
-        // --- Foreign keys as ALTER TABLE ADD CONSTRAINT. ----------------
-        foreach (var fk in fkeys)
-            sb.Append(RenderForeignKey(fk, realId)).Append("GO\n");
-
-        // --- Triggers on this table, verbatim from sys.sql_modules. -----
-        foreach (var (_, _, definition) in triggers)
-        {
-            sb.Append(definition.TrimEnd());
-            sb.Append("\nGO\n");
-        }
-
-        return sb.ToString();
+        return TableScriptRenderer.Render(
+            schema:           header.Value.Schema,
+            name:             header.Value.Name,
+            filegroup:        header.Value.Filegroup,
+            columns:          columns,
+            keyConstraints:   keyCons,
+            checkConstraints: checkCons,
+            foreignKeys:      fkeys,
+            indexes:          indexes,
+            triggers:         triggers,
+            dbCollation:      dbCollation);
     }
 
     // ---- Table header + DB collation --------------------------------------
@@ -491,35 +484,23 @@ WHERE tr.name = @name
 
     // ---- Column metadata ---------------------------------------------------
 
-    private sealed record ColumnInfo(
-        string Name,
-        string TypeName,
-        int    MaxLength,
-        byte   Precision,
-        byte   Scale,
-        bool   IsNullable,
-        bool   IsIdentity,
-        long?  IdentitySeed,
-        long?  IdentityIncrement,
-        bool   IdentityNotForReplication,
-        string? ComputedDefinition,
-        bool?  ComputedIsPersisted,
-        string? DefaultName,
-        string? DefaultDefinition,
-        string? CollationName,
-        bool   IsRowGuidCol);
+    // ─── Catalog readers — populate TableScriptRenderer record types ─────
+    //
+    // These methods do the SQL I/O. The rendering of the result lives in
+    // TableScriptRenderer and is shared with the bulk-fetch path so the
+    // on-disk SQL is identical regardless of which entry point produced it.
 
-    private static async Task<List<ColumnInfo>> LoadColumnsAsync(
+    private static async Task<List<TableScriptRenderer.ColumnInfo>> LoadColumnsAsync(
         SqlConnection conn, ObjectIdentifier id, CancellationToken ct)
     {
-        var list = new List<ColumnInfo>();
+        var list = new List<TableScriptRenderer.ColumnInfo>();
         await using var cmd = new SqlCommand(TableColumnsQuery, conn);
         cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
         cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            list.Add(new ColumnInfo(
+            list.Add(new TableScriptRenderer.ColumnInfo(
                 Name:                      reader.GetString(reader.GetOrdinal("name")),
                 TypeName:                  reader.GetString(reader.GetOrdinal("type_name")),
                 MaxLength:                 reader.GetInt16 (reader.GetOrdinal("max_length")),
@@ -540,163 +521,50 @@ WHERE tr.name = @name
         return list;
     }
 
-    /// <summary>
-    /// Renders one column line using SSDT/DACPAC conventions: uppercase
-    /// type names, aligned <c>[Name]</c> and type-spec columns, <c>COLLATE</c>
-    /// omitted when it matches the database default, inline <c>IDENTITY</c>
-    /// / <c>ROWGUIDCOL</c> / <c>DEFAULT</c>, and a trailing <c>NULL</c> /
-    /// <c>NOT NULL</c>.
-    /// </summary>
-    private static string RenderColumn(
-        ColumnInfo c, string nameField, string typeField, int maxName, int maxType, string? dbCollation)
-    {
-        // Computed columns have no type / nullability / default — just the expression.
-        if (c.ComputedDefinition is not null)
-        {
-            var persisted = c.ComputedIsPersisted == true ? " PERSISTED" : "";
-            return $"    {nameField.PadRight(maxName)} AS {c.ComputedDefinition}{persisted}";
-        }
-
-        var sb = new System.Text.StringBuilder(capacity: 128);
-        sb.Append("    ").Append(nameField.PadRight(maxName)).Append(' ')
-          .Append(typeField.PadRight(maxType));
-
-        // COLLATE only if non-null AND different from the database default.
-        if (IsStringLikeType(c.TypeName)
-            && !string.IsNullOrEmpty(c.CollationName)
-            && !string.Equals(c.CollationName, dbCollation, StringComparison.OrdinalIgnoreCase))
-        {
-            sb.Append(" COLLATE ").Append(c.CollationName);
-        }
-
-        if (c.IsIdentity)
-        {
-            sb.Append(" IDENTITY(").Append(c.IdentitySeed ?? 1).Append(',').Append(c.IdentityIncrement ?? 1).Append(')');
-            if (c.IdentityNotForReplication) sb.Append(" NOT FOR REPLICATION");
-        }
-
-        if (c.IsRowGuidCol)
-            sb.Append(" ROWGUIDCOL");
-
-        if (c.DefaultDefinition is not null)
-        {
-            sb.Append(' ');
-            if (c.DefaultName is not null)
-                sb.Append("CONSTRAINT [").Append(c.DefaultName).Append("] ");
-            sb.Append("DEFAULT ").Append(c.DefaultDefinition);
-        }
-
-        sb.Append(c.IsNullable ? " NULL" : " NOT NULL");
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Type spec in SSDT form: uppercase type name, space before the paren
-    /// for char / binary / scale types (<c>NVARCHAR (65)</c>, <c>DATETIME2 (0)</c>)
-    /// and no space for numeric types (<c>DECIMAL(6,2)</c>).
-    /// </summary>
-    private static string RenderTypeSpec(ColumnInfo c)
-    {
-        var upper = c.TypeName.ToUpperInvariant();
-        var lower = c.TypeName.ToLowerInvariant();
-        return lower switch
-        {
-            "char" or "varchar" or "binary" or "varbinary"
-                => $"{upper} ({(c.MaxLength == -1 ? "MAX" : c.MaxLength.ToString())})",
-            "nchar" or "nvarchar"
-                => $"{upper} ({(c.MaxLength == -1 ? "MAX" : (c.MaxLength / 2).ToString())})",
-            "decimal" or "numeric"
-                => $"{upper}({c.Precision},{c.Scale})",
-            "datetime2" or "datetimeoffset" or "time"
-                => $"{upper} ({c.Scale})",
-            _ => upper
-        };
-    }
-
-    private static bool IsStringLikeType(string t) => t.ToLowerInvariant() is
-        "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext";
-
-    // ---- PK / UQ constraints ----------------------------------------------
-
-    private sealed record KeyConstraintColumn(
-        string ConstraintName,
-        string ConstraintType,   // "PK" or "UQ"
-        string IndexType,        // CLUSTERED / NONCLUSTERED
-        byte   FillFactor,
-        bool   IsPadded,
-        string DataSpaceName,
-        string ColumnName,
-        bool   IsDescending);
-
-    private static async Task<List<KeyConstraintGroup>> LoadKeyConstraintsAsync(
+    private static async Task<List<TableScriptRenderer.KeyConstraintGroup>> LoadKeyConstraintsAsync(
         SqlConnection conn, ObjectIdentifier id, CancellationToken ct)
     {
-        var rows = new List<KeyConstraintColumn>();
+        var rows = new List<(string Name, string Type, string IndexType, byte FillFactor,
+                             bool IsPadded, string DataSpaceName, string Column, bool Desc)>();
         await using var cmd = new SqlCommand(TableKeyConstraintsQuery, conn);
         cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
         cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new KeyConstraintColumn(
-                ConstraintName: reader.GetString(reader.GetOrdinal("constraint_name")),
-                ConstraintType: reader.GetString(reader.GetOrdinal("constraint_type")).Trim(),
-                IndexType:      reader.GetString(reader.GetOrdinal("index_type")),
-                FillFactor:     reader.GetByte  (reader.GetOrdinal("fill_factor")),
-                IsPadded:       reader.GetBoolean(reader.GetOrdinal("is_padded")),
-                DataSpaceName:  reader.GetString(reader.GetOrdinal("data_space_name")),
-                ColumnName:     reader.GetString(reader.GetOrdinal("column_name")),
-                IsDescending:   reader.GetBoolean(reader.GetOrdinal("is_descending_key"))));
+            rows.Add((
+                reader.GetString(reader.GetOrdinal("constraint_name")),
+                reader.GetString(reader.GetOrdinal("constraint_type")).Trim(),
+                reader.GetString(reader.GetOrdinal("index_type")),
+                reader.GetByte  (reader.GetOrdinal("fill_factor")),
+                reader.GetBoolean(reader.GetOrdinal("is_padded")),
+                reader.GetString(reader.GetOrdinal("data_space_name")),
+                reader.GetString(reader.GetOrdinal("column_name")),
+                reader.GetBoolean(reader.GetOrdinal("is_descending_key"))));
         }
-        return rows.GroupBy(r => r.ConstraintName)
-                   .Select(g => new KeyConstraintGroup(
+        return rows.GroupBy(r => r.Name)
+                   .Select(g => new TableScriptRenderer.KeyConstraintGroup(
                        Name:          g.Key,
-                       Type:          g.First().ConstraintType,
+                       Type:          g.First().Type,
                        IndexType:     g.First().IndexType,
                        FillFactor:    g.First().FillFactor,
                        IsPadded:      g.First().IsPadded,
                        DataSpaceName: g.First().DataSpaceName,
-                       Columns:       g.Select(r => (r.ColumnName, r.IsDescending)).ToList()))
+                       Columns:       g.Select(r => (r.Column, r.Desc)).ToList()))
                    .ToList();
     }
 
-    private sealed record KeyConstraintGroup(
-        string Name, string Type, string IndexType,
-        byte FillFactor, bool IsPadded, string DataSpaceName,
-        List<(string Column, bool Desc)> Columns);
-
-    private static string RenderKeyConstraint(KeyConstraintGroup k)
-    {
-        var kind = k.Type.Equals("PK", StringComparison.OrdinalIgnoreCase)
-            ? "PRIMARY KEY"
-            : "UNIQUE";
-        var cols = string.Join(", ", k.Columns.Select(c => $"[{c.Column}] {(c.Desc ? "DESC" : "ASC")}"));
-        var with = new List<string>();
-        if (k.FillFactor > 0) with.Add($"FILLFACTOR = {k.FillFactor}");
-        if (k.IsPadded)       with.Add("PAD_INDEX = ON");
-        var withClause = with.Count == 0 ? "" : $" WITH ({string.Join(", ", with)})";
-        var onClause   = k.DataSpaceName.Equals("PRIMARY", StringComparison.OrdinalIgnoreCase)
-            ? ""
-            : $" ON [{k.DataSpaceName}]";
-        return $"    CONSTRAINT [{k.Name}] {kind} {k.IndexType} ({cols}){withClause}{onClause}";
-    }
-
-    // ---- Check constraints -------------------------------------------------
-
-    private sealed record CheckConstraintInfo(
-        string Name, string Definition, bool IsNotTrusted, bool IsNotForReplication);
-
-    private static async Task<List<CheckConstraintInfo>> LoadCheckConstraintsAsync(
+    private static async Task<List<TableScriptRenderer.CheckConstraintInfo>> LoadCheckConstraintsAsync(
         SqlConnection conn, ObjectIdentifier id, CancellationToken ct)
     {
-        var list = new List<CheckConstraintInfo>();
+        var list = new List<TableScriptRenderer.CheckConstraintInfo>();
         await using var cmd = new SqlCommand(TableCheckConstraintsQuery, conn);
         cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
         cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            list.Add(new CheckConstraintInfo(
+            list.Add(new TableScriptRenderer.CheckConstraintInfo(
                 Name:                reader.GetString(0),
                 Definition:          reader.GetString(1),
                 IsNotTrusted:        reader.GetBoolean(2),
@@ -705,155 +573,83 @@ WHERE tr.name = @name
         return list;
     }
 
-    /// <summary>
-    /// Renders one named CHECK constraint. <c>NOT FOR REPLICATION</c>
-    /// goes between <c>CHECK</c> and the predicate per T-SQL grammar —
-    /// dropping it would let replication agents trigger checks they
-    /// were configured to skip on production.
-    /// </summary>
-    private static string RenderCheckConstraint(CheckConstraintInfo c)
-    {
-        var nfr = c.IsNotForReplication ? " NOT FOR REPLICATION" : "";
-        return $"    CONSTRAINT [{c.Name}] CHECK{nfr} {c.Definition}";
-    }
-
-    // ---- Foreign keys ------------------------------------------------------
-
-    private sealed record ForeignKeyColumn(
-        string ConstraintName, bool IsNotTrusted, bool IsNotForReplication,
-        string RefSchema, string RefTable,
-        string ColumnName, string RefColumn, string OnDelete, string OnUpdate);
-
-    private static async Task<List<ForeignKeyGroup>> LoadForeignKeysAsync(
+    private static async Task<List<TableScriptRenderer.ForeignKeyGroup>> LoadForeignKeysAsync(
         SqlConnection conn, ObjectIdentifier id, CancellationToken ct)
     {
-        var rows = new List<ForeignKeyColumn>();
+        var rows = new List<(string Name, bool NotTrusted, bool NFR,
+                             string RefSchema, string RefTable,
+                             string Column, string RefColumn,
+                             string OnDelete, string OnUpdate)>();
         await using var cmd = new SqlCommand(TableForeignKeysQuery, conn);
         cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
         cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new ForeignKeyColumn(
-                ConstraintName:      reader.GetString(0),
-                IsNotTrusted:        reader.GetBoolean(1),
-                IsNotForReplication: reader.GetBoolean(2),
-                RefSchema:           reader.GetString(3),
-                RefTable:            reader.GetString(4),
-                ColumnName:          reader.GetString(6),
-                RefColumn:           reader.GetString(7),
-                OnDelete:            reader.GetString(8),
-                OnUpdate:            reader.GetString(9)));
+            rows.Add((
+                reader.GetString(0),
+                reader.GetBoolean(1),
+                reader.GetBoolean(2),
+                reader.GetString(3),
+                reader.GetString(4),
+                reader.GetString(6),
+                reader.GetString(7),
+                reader.GetString(8),
+                reader.GetString(9)));
         }
-        return rows.GroupBy(r => r.ConstraintName)
-                   .Select(g => new ForeignKeyGroup(
+        return rows.GroupBy(r => r.Name)
+                   .Select(g => new TableScriptRenderer.ForeignKeyGroup(
                        Name:                g.Key,
-                       IsNotTrusted:        g.First().IsNotTrusted,
-                       IsNotForReplication: g.First().IsNotForReplication,
+                       IsNotTrusted:        g.First().NotTrusted,
+                       IsNotForReplication: g.First().NFR,
                        RefSchema:           g.First().RefSchema,
                        RefTable:            g.First().RefTable,
                        OnDelete:            g.First().OnDelete,
                        OnUpdate:            g.First().OnUpdate,
-                       Columns:             g.Select(r => (r.ColumnName, r.RefColumn)).ToList()))
+                       Columns:             g.Select(r => (r.Column, r.RefColumn)).ToList()))
                    .ToList();
     }
 
-    private sealed record ForeignKeyGroup(
-        string Name, bool IsNotTrusted, bool IsNotForReplication,
-        string RefSchema, string RefTable,
-        string OnDelete, string OnUpdate,
-        List<(string Column, string RefColumn)> Columns);
-
-    /// <summary>
-    /// Emits a foreign-key as <c>ALTER TABLE ... ADD CONSTRAINT</c>.
-    /// <c>NOT FOR REPLICATION</c> sits after the column list and before
-    /// the optional <c>ON DELETE</c>/<c>ON UPDATE</c> clauses per T-SQL
-    /// grammar.
-    /// </summary>
-    private static string RenderForeignKey(ForeignKeyGroup fk, ObjectIdentifier id)
-    {
-        var cols    = string.Join(", ", fk.Columns.Select(c => $"[{c.Column}]"));
-        var refCols = string.Join(", ", fk.Columns.Select(c => $"[{c.RefColumn}]"));
-        var check   = fk.IsNotTrusted ? "WITH NOCHECK" : "WITH CHECK";
-        var nfr     = fk.IsNotForReplication ? " NOT FOR REPLICATION" : "";
-        var onDel   = fk.OnDelete.Equals("NO_ACTION", StringComparison.OrdinalIgnoreCase)
-            ? "" : $" ON DELETE {fk.OnDelete.Replace('_', ' ')}";
-        var onUpd   = fk.OnUpdate.Equals("NO_ACTION", StringComparison.OrdinalIgnoreCase)
-            ? "" : $" ON UPDATE {fk.OnUpdate.Replace('_', ' ')}";
-        return $"ALTER TABLE [{id.Schema}].[{id.Name}] {check} ADD CONSTRAINT [{fk.Name}] " +
-               $"FOREIGN KEY ({cols}) REFERENCES [{fk.RefSchema}].[{fk.RefTable}] ({refCols})" +
-               $"{nfr}{onDel}{onUpd};\n";
-    }
-
-    // ---- Non-PK/UQ indexes -------------------------------------------------
-
-    private sealed record IndexColumn(
-        string IndexName, string TypeDesc, bool IsUnique, string? Filter,
-        bool IsIncluded, string ColumnName, bool IsDescending);
-
-    private static async Task<List<IndexGroup>> LoadIndexesAsync(
+    private static async Task<List<TableScriptRenderer.IndexGroup>> LoadIndexesAsync(
         SqlConnection conn, ObjectIdentifier id, CancellationToken ct)
     {
-        var rows = new List<IndexColumn>();
+        var rows = new List<(string Name, string TypeDesc, bool IsUnique, string? Filter,
+                             bool IsIncluded, string Column, bool Desc)>();
         await using var cmd = new SqlCommand(TableIndexesQuery, conn);
         cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
         cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {
-            rows.Add(new IndexColumn(
-                IndexName:    reader.GetString(0),
-                TypeDesc:     reader.GetString(1),
-                IsUnique:     reader.GetBoolean(2),
-                Filter:       SafeString(reader, "filter_definition"),
-                IsIncluded:   reader.GetBoolean(6),
-                ColumnName:   reader.GetString(7),
-                IsDescending: reader.GetBoolean(8)));
+            rows.Add((
+                reader.GetString(0),
+                reader.GetString(1),
+                reader.GetBoolean(2),
+                SafeString(reader, "filter_definition"),
+                reader.GetBoolean(6),
+                reader.GetString(7),
+                reader.GetBoolean(8)));
         }
-        return rows.GroupBy(r => r.IndexName)
-                   .Select(g => new IndexGroup(
+        return rows.GroupBy(r => r.Name)
+                   .Select(g => new TableScriptRenderer.IndexGroup(
                        Name:     g.Key,
                        TypeDesc: g.First().TypeDesc,
                        IsUnique: g.First().IsUnique,
                        Filter:   g.First().Filter,
                        KeyCols:     g.Where(r => !r.IsIncluded)
-                                     .Select(r => (r.ColumnName, r.IsDescending)).ToList(),
+                                     .Select(r => (r.Column, r.Desc)).ToList(),
                        IncludeCols: g.Where(r => r.IsIncluded)
-                                     .Select(r => r.ColumnName).ToList()))
+                                     .Select(r => r.Column).ToList()))
                    .ToList();
     }
 
-    private sealed record IndexGroup(
-        string Name, string TypeDesc, bool IsUnique, string? Filter,
-        List<(string Column, bool Desc)> KeyCols,
-        List<string> IncludeCols);
-
-    private static string RenderIndex(IndexGroup ix, ObjectIdentifier id)
-    {
-        var unique  = ix.IsUnique ? "UNIQUE " : "";
-        var keyCols = string.Join(", ", ix.KeyCols.Select(c => $"[{c.Column}] {(c.Desc ? "DESC" : "ASC")}"));
-        var include = ix.IncludeCols.Count == 0
-            ? ""
-            : $" INCLUDE ({string.Join(", ", ix.IncludeCols.Select(c => $"[{c}]"))})";
-        var filter  = string.IsNullOrWhiteSpace(ix.Filter) ? "" : $" WHERE {ix.Filter}";
-        return $"CREATE {unique}{ix.TypeDesc} INDEX [{ix.Name}] " +
-               $"ON [{id.Schema}].[{id.Name}] ({keyCols}){include}{filter};\n";
-    }
-
-    // ---- Triggers on this table -------------------------------------------
-
-    private static async Task<List<(string Schema, string Name, string Definition)>> LoadTriggersAsync(
-        SqlConnection conn, ObjectIdentifier id, CancellationToken ct)
-    {
-        var list = new List<(string, string, string)>();
-        await using var cmd = new SqlCommand(TableTriggersQuery, conn);
-        cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
-        cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
-        await using var reader = await cmd.ExecuteReaderAsync(ct);
-        while (await reader.ReadAsync(ct))
-            list.Add((reader.GetString(1), reader.GetString(0), reader.GetString(2)));
-        return list;
-    }
+    // Triggers-on-this-table loader removed — triggers are captured as
+    // their own first-class objects (type='TR') and never embedded in
+    // a table's CREATE script any more. The "Triggers on this table"
+    // sidebar in SnapshotsView surfaces the relationship instead.
+    // The TableTriggersQuery constant above is left unused but kept as
+    // documentation for the SQL pattern in case a future feature needs
+    // the same join.
 
     // ---- Reader helpers ----------------------------------------------------
 

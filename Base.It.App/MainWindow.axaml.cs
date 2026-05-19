@@ -16,9 +16,10 @@ public partial class MainWindow : AppWindow
     private Frame _host = null!;
     private Border _groupSelector = null!;
     private TextBlock _themeGlyph = null!;
+    // Find overlay is no longer triggered by Ctrl+F (its filter-mirroring
+    // behaviour was confusing). Border ref is kept so the dead Esc-to-
+    // close handler can still hide it if it's ever shown via other code.
     private Border _findOverlay = null!;
-    private TextBox _findBox = null!;
-    private bool _suppressFindEcho;
 
     private MainWindowViewModel Vm => (MainWindowViewModel)DataContext!;
 
@@ -30,7 +31,6 @@ public partial class MainWindow : AppWindow
         _groupSelector = this.FindControl<Border>("GroupSelector")!;
         _themeGlyph = this.FindControl<TextBlock>("ThemeGlyph")!;
         _findOverlay = this.FindControl<Border>("FindOverlay")!;
-        _findBox = this.FindControl<TextBox>("FindBox")!;
         _nav.SelectionChanged += OnNavSelectionChanged;
 
         // Window-wide Ctrl+F: like a browser's find. Routes to whatever
@@ -46,6 +46,13 @@ public partial class MainWindow : AppWindow
         Vm.Services.Theme.ApplyFromSettings();
         Vm.Services.Theme.ThemeChanged += UpdateThemeGlyph;
         UpdateThemeGlyph();
+
+        // Version pill: belt-and-braces. The XAML binding to
+        // Services.Updater.CurrentVersion should resolve, but compiled
+        // bindings can be finicky across NavigationView.PaneFooter's
+        // NameScope and we want the pill to show *something* on every
+        // launch. Set the text imperatively here as a fallback.
+        UpdateVersionPillText();
 
         Vm.NavigateToCompareRequested += () =>
         {
@@ -204,6 +211,31 @@ public partial class MainWindow : AppWindow
         Vm.Services.Theme.Toggle();
     }
 
+    /// <summary>
+    /// Version pill in the pane footer → navigate to Settings. The user
+    /// can then scroll to the "Updates" expander. Kept simple: the pill
+    /// is a shortcut, not a deep-link with state hand-off.
+    /// </summary>
+    private void OnVersionPillClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        SelectByTag("Settings");
+    }
+
+    /// <summary>
+    /// Sets the version pill's text from UpdaterService.CurrentVersion
+    /// imperatively as a fallback to the XAML binding. The binding path
+    /// (Services.Updater.CurrentVersion) flows across the NavigationView.
+    /// PaneFooter NameScope which can interact oddly with compiled
+    /// bindings; this guarantees the pill always shows a number.
+    /// </summary>
+    private void UpdateVersionPillText()
+    {
+        var tb = this.FindControl<TextBlock>("VersionPillText");
+        if (tb is null) return;
+        var v = Vm.Services.Updater?.CurrentVersion;
+        tb.Text = string.IsNullOrWhiteSpace(v) ? "version" : $"v{v}";
+    }
+
     private void UpdateThemeGlyph()
     {
         if (_themeGlyph is null) return;
@@ -233,81 +265,44 @@ public partial class MainWindow : AppWindow
     }
 
     /// <summary>
-    /// Global Ctrl+F handler. Opens (or closes) the find overlay — a
-    /// floating popup at the top-right of the window. Browser-style:
-    /// the find UI is transient chrome the window owns, not a permanent
-    /// input baked into each page.
+    /// Global Ctrl+F handler. Asks the active view to put keyboard focus
+    /// on its own visible filter textbox. The old behaviour opened a
+    /// shadow overlay that silently mirrored the page's filter property,
+    /// which made it look like there were two separate "search" inputs
+    /// when really both were editing the same backing field — confusing.
+    /// The overlay is kept in the XAML for now but no longer triggered.
     /// </summary>
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Handled) return;
         if (e.Key != Key.F || !e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
-        if (_host?.Content is not ISupportsFind) return;
-        ShowFindOverlay();
-        e.Handled = true;
+        if (_host?.Content is ISupportsFind find && find.FocusFindBox())
+            e.Handled = true;
     }
 
-    /// <summary>
-    /// Show the find overlay and pre-populate it with the active view's
-    /// current filter. Focuses + selects the textbox so a fresh
-    /// keystroke replaces whatever's in there.
-    /// </summary>
-    private void ShowFindOverlay()
-    {
-        if (_findOverlay is null || _findBox is null) return;
-        if (_host?.Content is not ISupportsFind find) return;
-
-        _suppressFindEcho = true;
-        try { _findBox.Text = find.CurrentFindText; }
-        finally { _suppressFindEcho = false; }
-
-        _findOverlay.IsVisible = true;
-        _findBox.Focus();
-        _findBox.SelectAll();
-    }
-
-    /// <summary>
-    /// Close the find overlay AND clear the active view's filter — the
-    /// browser pattern. If the user wants the filter to stick, they can
-    /// just leave the overlay open (it doesn't steal focus once they've
-    /// clicked back into the page).
-    /// </summary>
-    private void HideFindOverlay()
-    {
-        if (_findOverlay is null) return;
-        _findOverlay.IsVisible = false;
-
-        if (_host?.Content is ISupportsFind find)
-            find.ApplyFind(string.Empty);
-
-        if (_findBox is not null)
-        {
-            _suppressFindEcho = true;
-            try { _findBox.Text = string.Empty; }
-            finally { _suppressFindEcho = false; }
-        }
-    }
+    // The overlay-based find handlers below are kept callable from XAML
+    // (the FindOverlay Border + FindBox TextBox + close button reference
+    // them) but Ctrl+F no longer triggers ShowFindOverlay, so the overlay
+    // is effectively dead UI. They're left in place to avoid a churn in
+    // MainWindow XAML; a future cleanup can drop the overlay entirely.
 
     private void OnFindBoxTextChanged(object? sender, Avalonia.Controls.TextChangedEventArgs e)
     {
-        if (_suppressFindEcho) return;
-        if (sender is not TextBox tb) return;
-        if (_host?.Content is ISupportsFind find)
-            find.ApplyFind(tb.Text);
+        // No-op now — Ctrl+F focuses the page's filter textbox directly.
     }
 
     private void OnFindBoxKeyDown(object? sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        if (e.Key == Key.Escape && _findOverlay is not null)
         {
-            HideFindOverlay();
+            _findOverlay.IsVisible = false;
             e.Handled = true;
         }
     }
 
     private void OnFindClose(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
     {
-        HideFindOverlay();
+        if (_findOverlay is not null) _findOverlay.IsVisible = false;
         e.Handled = true;
     }
 
@@ -337,20 +332,22 @@ public partial class MainWindow : AppWindow
             case "Scripts": Vm.Scripts.Reload();           break;
             case "Query":   Vm.Query.Reload();             break;
             case "Watch":   _ = Vm.Watch.InitializeAsync();break;
+            case "Snapshots": Vm.Snapshots.Reload(); break;
             case "Settings": Vm.Settings.LoadCommand.Execute(null); break;
         }
 
         Control view = tag switch
         {
-            "Home"     => new HomeView     { DataContext = Vm.Home     },
-            "Compare"  => new CompareView  { DataContext = Vm.Compare  },
-            "Sync"     => new SyncView     { DataContext = Vm.Sync     },
-            "Batch"    => new BatchView    { DataContext = Vm.Batch    },
-            "Scripts"  => new ScriptsView  { DataContext = Vm.Scripts  },
-            "Query"    => new QueryView    { DataContext = Vm.Query    },
-            "Watch"    => new WatchView    { DataContext = Vm.Watch    },
-            "Settings" => new SettingsView { DataContext = Vm.Settings },
-            _          => new TextBlock { Text = "?" }
+            "Home"      => new HomeView      { DataContext = Vm.Home      },
+            "Compare"   => new CompareView   { DataContext = Vm.Compare   },
+            "Sync"      => new SyncView      { DataContext = Vm.Sync      },
+            "Batch"     => new BatchView     { DataContext = Vm.Batch     },
+            "Scripts"   => new ScriptsView   { DataContext = Vm.Scripts   },
+            "Query"     => new QueryView     { DataContext = Vm.Query     },
+            "Watch"     => new WatchView     { DataContext = Vm.Watch     },
+            "Snapshots" => new SnapshotsView { DataContext = Vm.Snapshots },
+            "Settings"  => new SettingsView  { DataContext = Vm.Settings  },
+            _           => new TextBlock { Text = "?" }
         };
         _host.Content = view;
     }

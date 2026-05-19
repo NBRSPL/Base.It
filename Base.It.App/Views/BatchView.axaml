@@ -85,25 +85,34 @@
                              dropdown control while staying searchable. -->
                         <Border Classes="dropdownShell">
                         <Grid ColumnDefinitions="*,Auto">
-                        <AutoCompleteBox Grid.Column="0" x:Name="SourceBox" MinWidth="200"
+                        <AutoCompleteBox Grid.Column="0" x:Name="SourceBox" MinWidth="220"
                                          MinimumPrefixLength="0" FilterMode="Contains"
                                          BorderThickness="0" Background="Transparent"
-                                         ItemsSource="{Binding SourceCandidateEndpoints}"
-                                         SelectedItem="{Binding SelectedSourceEndpoint, Mode=TwoWay}"
+                                         ItemsSource="{Binding SourceCandidates}"
+                                         SelectedItem="{Binding SelectedSource, Mode=TwoWay}"
                                          GotFocus="OnEndpointPickerGotFocus"
-                                         Watermark="Source">
+                                         Watermark="Source (live or snapshot)">
                             <AutoCompleteBox.ItemTemplate>
-                                <DataTemplate DataType="vm:EndpointPick">
-                                    <Grid ColumnDefinitions="Auto,*" Margin="0,2">
+                                <DataTemplate DataType="vm:BatchSourceItem">
+                                    <Grid ColumnDefinitions="Auto,*,Auto" Margin="0,2">
                                         <Ellipse Grid.Column="0" Width="8" Height="8" VerticalAlignment="Center"
                                                  Fill="{Binding Color, Converter={x:Static vm:ColorStringBrushConverter.Instance}}"
                                                  Margin="0,0,8,0"/>
                                         <StackPanel Grid.Column="1">
                                             <TextBlock Text="{Binding Label}" FontSize="12"/>
                                             <TextBlock Text="{Binding SubLabel}"
-                                                       FontSize="10" Opacity="0.55"
-                                                       IsVisible="{Binding ShowSubLabel}"/>
+                                                       FontSize="10" Opacity="0.55"/>
                                         </StackPanel>
+                                        <!-- Tiny "snapshot" pill so users can tell snapshot rows
+                                             apart from live endpoints at a glance. Hidden for live. -->
+                                        <Border Grid.Column="2"
+                                                Background="{DynamicResource App.AccentBrush}"
+                                                CornerRadius="3" Padding="4,1" Margin="6,0,0,0"
+                                                IsVisible="{Binding IsSnapshot}"
+                                                VerticalAlignment="Center">
+                                            <TextBlock Text="snapshot" FontSize="9" FontWeight="SemiBold"
+                                                       Foreground="White"/>
+                                        </Border>
                                     </Grid>
                                 </DataTemplate>
                             </AutoCompleteBox.ItemTemplate>
@@ -127,6 +136,23 @@
                                 IsVisible="{Binding SourceProfile, Converter={x:Static ObjectConverters.IsNotNull}}"
                                 VerticalAlignment="Center">
                             <TextBlock Text="{Binding SourceProfile.Label}"/>
+                        </Border>
+                        <!-- "from snapshot …" pill — appears only when the
+                             picked source is a stored snapshot. Tooltip
+                             carries the full timestamp / custom name for
+                             reproducibility traceability. -->
+                        <Border Background="{DynamicResource App.AccentBrush}"
+                                CornerRadius="4" Padding="6,2" Margin="6,0,0,0"
+                                VerticalAlignment="Center"
+                                IsVisible="{Binding IsSnapshotSource}"
+                                ToolTip.Tip="{Binding SourceSnapshotDisplayName, StringFormat='Source SQL will be read from snapshot: {0}'}">
+                            <StackPanel Orientation="Horizontal" Spacing="3">
+                                <TextBlock Text="&#xE7B8;"
+                                           FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                           FontSize="10" Foreground="White"/>
+                                <TextBlock Text="snapshot"
+                                           FontSize="10" FontWeight="SemiBold" Foreground="White"/>
+                            </StackPanel>
                         </Border>
                     </StackPanel>
                     </Border>
@@ -315,14 +341,18 @@
                  "just one of the buttons up top". -->
             <Border Grid.Row="1" Classes="toolbar" Margin="0,0,0,6">
                 <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto">
-                    <!-- Load opens a file picker; the path textbox is for power
-                         users who want to paste a path directly. -->
+                    <!-- Load opens a file picker; the textbox accepts both a
+                         local path and an HTTP(S) URL. Both CSV and XLSX
+                         work in either mode. Google Sheets browser URLs
+                         are auto-rewritten to a direct XLSX export, so a
+                         pasted /edit?usp=sharing link just works. Same
+                         parsing rule throughout: skip row 1, take column 1. -->
                     <Button Grid.Column="0" MinWidth="84" Content="Load…"
                             Click="OnLoadClick"
-                            ToolTip.Tip="Pick a .csv / .xlsx with one object name per row. (Or paste a path next to it.)"/>
-                    <TextBox Grid.Column="1" Width="240" Margin="6,0,0,0"
+                            ToolTip.Tip="Pick a .csv / .xlsx file, or paste a path / URL next to it. CSV and XLSX both supported from local or URL. First row = header (skipped); column 1 = object name."/>
+                    <TextBox Grid.Column="1" Width="300" Margin="6,0,0,0"
                              Text="{Binding FilePath}"
-                             Watermark="…or paste a path">
+                             Watermark="…or paste a path / URL (CSV or XLSX)">
                         <TextBox.KeyBindings>
                             <KeyBinding Gesture="Enter" Command="{Binding LoadFromFileCommand}"/>
                         </TextBox.KeyBindings>
@@ -437,7 +467,33 @@
                             BorderBrush="{DynamicResource App.StrokeBrush}"
                             BorderThickness="0,0,0,1">
                         <Grid ColumnDefinitions="44,50,*,100,40,2*" Margin="0,7">
-                            <!-- col 0: blank (row checkbox col); col 4: blank (preview col) -->
+                            <!-- col 0: select-all toggle (same Button-styled-as-checkbox
+                                 as the compare grid header in Snapshots). Clicking it
+                                 ticks every visible row, or clears them if any are
+                                 ticked. Glyph reflects state: "✓" all, "–" mixed,
+                                 blank none. -->
+                            <Button Grid.Column="0"
+                                    Width="20" Height="20"
+                                    Padding="0"
+                                    MinWidth="0" MinHeight="0"
+                                    CornerRadius="3"
+                                    Background="Transparent"
+                                    BorderBrush="{DynamicResource App.StrokeStrongBrush}"
+                                    BorderThickness="2"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    HorizontalContentAlignment="Center"
+                                    VerticalContentAlignment="Center"
+                                    Command="{Binding ToggleAllItemsCommand}"
+                                    ToolTip.Tip="Tick / untick every visible row.">
+                                <TextBlock Text="{Binding SelectAllGlyph}"
+                                           FontSize="12" FontWeight="Bold"
+                                           LineHeight="14"
+                                           TextAlignment="Center"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                            </Button>
+                            <!-- col 4: blank (preview col) -->
                             <TextBlock Grid.Column="1" Text="#" FontSize="11" FontWeight="SemiBold"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        Foreground="{DynamicResource App.TextSecondaryBrush}"/>
@@ -492,9 +548,31 @@
                             <DataGridTemplateColumn Header="" Width="44" CanUserResize="False" CanUserSort="False">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate DataType="vm:BatchItem">
-                                        <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay}"
-                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                  Margin="0" Padding="0" MinWidth="0"/>
+                                        <!-- Same Button primitive as the header above —
+                                             identical Width/Height, border, corner radius.
+                                             Click toggles this row's IsSelected via the
+                                             row's ToggleSelectionCommand. The "✓" glyph
+                                             appears only when IsSelected. -->
+                                        <Button Width="20" Height="20"
+                                                Padding="0"
+                                                MinWidth="0" MinHeight="0"
+                                                CornerRadius="3"
+                                                Background="Transparent"
+                                                BorderBrush="{DynamicResource App.StrokeStrongBrush}"
+                                                BorderThickness="2"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                HorizontalContentAlignment="Center"
+                                                VerticalContentAlignment="Center"
+                                                Command="{Binding ToggleSelectionCommand}">
+                                            <TextBlock Text="✓"
+                                                       FontSize="12" FontWeight="Bold"
+                                                       LineHeight="14"
+                                                       TextAlignment="Center"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"
+                                                       IsVisible="{Binding IsSelected}"/>
+                                        </Button>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
@@ -506,7 +584,9 @@
                                     <DataTemplate DataType="vm:BatchItem">
                                         <Button Classes="rowIconBtn" Click="OnPreviewClick" Tag="{Binding}"
                                                 ToolTip.Tip="Preview this row's source + every ticked target — fetches the live CREATE definition from each, no execution.">
-                                            <TextBlock Text="👁" FontSize="12"/>
+                                            <TextBlock Text="&#xE890;"
+                                                       FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                       FontSize="13"/>
                                         </Button>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
