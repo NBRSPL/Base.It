@@ -97,16 +97,17 @@
                 </Border>
 
                 <!-- ─────────── Recent changes panel ───────────
-                     "What was changed since X?" — direct read of
-                     sys.objects.modify_date on the picked endpoint, no
-                     snapshot required. Collapsed by default (Expander
-                     header is a single thin row) so it never takes
-                     space unless the user clicks into it. Compact
-                     control row: Since + Refresh + status + Send-to-
-                     Batch. Result grid uses the same external-header
-                     pattern as the compare grid, capped at 240 px so
-                     it never dominates the page. -->
-                <Expander Header="Recent changes (sys.objects.modify_date)"
+                     "What changed since X?" — direct read of
+                     sys.objects.modify_date on the picked endpoint, NOT
+                     a stored snapshot. Collapsed by default so the
+                     header is a single thin row; expanding shows a
+                     CalendarDatePicker + Find / Send-to-Batch row, then
+                     the result grid which uses the SAME header pattern
+                     as the snapshot Entries grid (funnel filters on
+                     Schema + Object Type, inline sort arrows on Name +
+                     Modified). MaxHeight=260 so it never dominates the
+                     page. -->
+                <Expander Header="Recent changes — find objects modified since a date (live query, not a snapshot)"
                           IsExpanded="False" Margin="0,0,0,8">
                     <DockPanel>
                         <!-- Controls row -->
@@ -117,15 +118,20 @@
                                        VerticalAlignment="Center"
                                        FontSize="11" Opacity="0.7"
                                        Margin="0,0,8,0"/>
-                            <DatePicker Grid.Column="1"
-                                        SelectedDate="{Binding RecentChangesSince, Mode=TwoWay}"
-                                        MinHeight="30"
-                                        VerticalAlignment="Center"/>
+                            <!-- CalendarDatePicker shows a proper month-grid
+                                 popup (Avalonia DatePicker is the wheel-style
+                                 one the user disliked). Width-constrained so
+                                 it doesn't bloat the row. -->
+                            <CalendarDatePicker Grid.Column="1"
+                                                SelectedDate="{Binding RecentChangesSince, Converter={x:Static vm:DateTimeOffsetToDateTimeConverter.Instance}, Mode=TwoWay}"
+                                                Width="140" MinHeight="30"
+                                                VerticalAlignment="Center"
+                                                Watermark="Pick a date"/>
                             <Button Grid.Column="2"
-                                    Content="Refresh" Margin="8,0,0,0" MinHeight="30"
+                                    Content="Find changes" Margin="8,0,0,0" MinHeight="30"
                                     Command="{Binding RefreshRecentChangesCommand}"
                                     IsEnabled="{Binding !IsRecentChangesBusy}"
-                                    ToolTip.Tip="Re-query sys.objects for changes since the picked date."/>
+                                    ToolTip.Tip="Query sys.objects for objects modified on or after the picked date. Live read; no snapshot saved."/>
                             <TextBlock Grid.Column="3"
                                        Text="{Binding RecentChangesStatus}"
                                        VerticalAlignment="Center"
@@ -140,28 +146,25 @@
                         </Grid>
 
                         <!-- Result grid. Hidden when nothing's been
-                             fetched yet so the Expander body collapses
-                             cleanly until Refresh has produced rows. -->
+                             found yet so the Expander body stays
+                             compact until Find has produced rows. -->
                         <Border BorderThickness="1"
                                 BorderBrush="{DynamicResource App.StrokeBrush}"
                                 CornerRadius="4"
-                                MaxHeight="240"
+                                MaxHeight="260"
                                 IsVisible="{Binding RecentChanges.Count}">
                             <DockPanel>
                                 <!-- Custom column header — same shape as the
-                                     compare grid's external header so the
-                                     row-checkbox / column-label alignment is
-                                     pixel-identical. ColumnDefinitions MUST
+                                     snapshot Entries grid (filter flyouts on
+                                     Schema + Object Type, sort arrows on
+                                     Name + Modified). ColumnDefinitions MUST
                                      match the DataGrid's Columns widths below. -->
                                 <Border DockPanel.Dock="Top"
                                         Background="{DynamicResource App.ElevatedBgBrush}"
                                         BorderBrush="{DynamicResource App.StrokeBrush}"
                                         BorderThickness="0,0,0,1">
-                                    <Grid ColumnDefinitions="40,90,*,120,140" Margin="0,7">
-                                        <!-- Select-all Button (Button-styled-as-CheckBox
-                                             so it visually matches the row cells; Avalonia
-                                             DataGrid won't render a real CheckBox in a
-                                             header). -->
+                                    <Grid ColumnDefinitions="40,100,*,140,150" Margin="0,7">
+                                        <!-- Select-all Button -->
                                         <Button Grid.Column="0"
                                                 Width="20" Height="20"
                                                 Padding="0"
@@ -183,26 +186,116 @@
                                                        HorizontalAlignment="Center"
                                                        VerticalAlignment="Center"/>
                                         </Button>
-                                        <TextBlock Grid.Column="1" Text="Schema"
-                                                   FontSize="11" FontWeight="SemiBold"
-                                                   Padding="6,0,0,0"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource App.TextSecondaryBrush}"/>
-                                        <TextBlock Grid.Column="2" Text="Name"
-                                                   FontSize="11" FontWeight="SemiBold"
-                                                   Padding="6,0,0,0"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource App.TextSecondaryBrush}"/>
-                                        <TextBlock Grid.Column="3" Text="Object Type"
-                                                   FontSize="11" FontWeight="SemiBold"
-                                                   Padding="6,0,0,0"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource App.TextSecondaryBrush}"/>
-                                        <TextBlock Grid.Column="4" Text="Modified (UTC)"
-                                                   FontSize="11" FontWeight="SemiBold"
-                                                   Padding="6,0,0,0"
-                                                   VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+
+                                        <!-- Schema (funnel filter) -->
+                                        <Button Grid.Column="1"
+                                                Background="Transparent" BorderThickness="0"
+                                                Padding="6,0,0,0"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left">
+                                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock Text="Schema"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                <TextBlock Text="&#xE71C;"
+                                                           FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                           FontSize="11" Opacity="0.6"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <Flyout Placement="Bottom">
+                                                    <StackPanel Spacing="2" MinWidth="160">
+                                                        <TextBlock Text="Filter by schema" FontSize="11" Opacity="0.6" Margin="0,0,0,4"/>
+                                                        <ItemsControl ItemsSource="{Binding RecentChangesSchemaFilterValues}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate DataType="vm:DiffFilterValue">
+                                                                    <CheckBox Content="{Binding Value}"
+                                                                              IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                                              Margin="0,2"/>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+
+                                        <!-- Name (sort arrow inline) -->
+                                        <Button Grid.Column="2"
+                                                Background="Transparent" BorderThickness="0"
+                                                Padding="6,0,0,0"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left"
+                                                Command="{Binding ToggleRecentChangesNameSortCommand}"
+                                                ToolTip.Tip="Click to sort A→Z / Z→A / clear sort.">
+                                            <StackPanel Orientation="Horizontal" Spacing="4"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock Text="Name"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                <TextBlock Text="{Binding RecentChangesNameSortIndicator}"
+                                                           FontSize="10" Opacity="0.7"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
+
+                                        <!-- Object Type (funnel filter) -->
+                                        <Button Grid.Column="3"
+                                                Background="Transparent" BorderThickness="0"
+                                                Padding="6,0,0,0"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left">
+                                            <StackPanel Orientation="Horizontal" Spacing="6"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock Text="Object Type"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                <TextBlock Text="&#xE71C;"
+                                                           FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                                           FontSize="11" Opacity="0.6"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                            <Button.Flyout>
+                                                <Flyout Placement="Bottom">
+                                                    <StackPanel Spacing="2" MinWidth="200">
+                                                        <TextBlock Text="Filter by object type" FontSize="11" Opacity="0.6" Margin="0,0,0,4"/>
+                                                        <ItemsControl ItemsSource="{Binding RecentChangesKindFilterValues}">
+                                                            <ItemsControl.ItemTemplate>
+                                                                <DataTemplate DataType="vm:DiffFilterValue">
+                                                                    <CheckBox Content="{Binding Value}"
+                                                                              IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                                              Margin="0,2"/>
+                                                                </DataTemplate>
+                                                            </ItemsControl.ItemTemplate>
+                                                        </ItemsControl>
+                                                    </StackPanel>
+                                                </Flyout>
+                                            </Button.Flyout>
+                                        </Button>
+
+                                        <!-- Modified (sort arrow inline) -->
+                                        <Button Grid.Column="4"
+                                                Background="Transparent" BorderThickness="0"
+                                                Padding="6,0,0,0"
+                                                HorizontalAlignment="Stretch"
+                                                HorizontalContentAlignment="Left"
+                                                Command="{Binding ToggleRecentChangesModifiedSortCommand}"
+                                                ToolTip.Tip="Click to sort newest→oldest / oldest→newest / clear sort.">
+                                            <StackPanel Orientation="Horizontal" Spacing="4"
+                                                        VerticalAlignment="Center">
+                                                <TextBlock Text="Modified (UTC)"
+                                                           FontSize="11" FontWeight="SemiBold"
+                                                           VerticalAlignment="Center"
+                                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                                <TextBlock Text="{Binding RecentChangesModifiedSortIndicator}"
+                                                           FontSize="10" Opacity="0.7"
+                                                           VerticalAlignment="Center"/>
+                                            </StackPanel>
+                                        </Button>
                                     </Grid>
                                 </Border>
 
@@ -213,7 +306,6 @@
                                           CanUserReorderColumns="False"
                                           SelectionMode="Single">
                                     <DataGrid.Columns>
-                                        <!-- col 0: row select (same Button primitive as the header) -->
                                         <DataGridTemplateColumn Width="40" CanUserResize="False" CanUserSort="False">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate DataType="vm:RecentChangeRowVm">
@@ -240,7 +332,7 @@
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Width="90" CanUserSort="False">
+                                        <DataGridTemplateColumn Width="100" CanUserSort="False">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate DataType="vm:RecentChangeRowVm">
                                                     <TextBlock Text="{Binding Schema}" VerticalAlignment="Center" Padding="6,0,0,0"/>
@@ -254,14 +346,14 @@
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Width="120" CanUserSort="False">
+                                        <DataGridTemplateColumn Width="140" CanUserSort="False">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate DataType="vm:RecentChangeRowVm">
                                                     <TextBlock Text="{Binding Kind}" VerticalAlignment="Center" Padding="6,0,0,0"/>
                                                 </DataTemplate>
                                             </DataGridTemplateColumn.CellTemplate>
                                         </DataGridTemplateColumn>
-                                        <DataGridTemplateColumn Width="140" CanUserSort="False">
+                                        <DataGridTemplateColumn Width="150" CanUserSort="False">
                                             <DataGridTemplateColumn.CellTemplate>
                                                 <DataTemplate DataType="vm:RecentChangeRowVm">
                                                     <TextBlock Text="{Binding ModifiedAtUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"

@@ -175,11 +175,16 @@ public sealed partial class SnapshotsViewModel : ObservableObject
     // browser on the Snapshots screen. Send-to-Batch uses the same
     // SendToBatchPayload route the diff panel uses.
 
+    /// <summary>Visible rows in the recent-changes grid (after filter + sort applied).</summary>
     public ObservableCollection<RecentChangeRowVm> RecentChanges { get; } = new();
+
+    /// <summary>Master list, populated by the Find query. Filter + sort
+    /// produce the visible <see cref="RecentChanges"/> view from this.</summary>
+    private List<RecentChangeRowVm> _allRecentChanges = new();
 
     /// <summary>
     /// Date threshold for the "Recent changes" query. Bound to a
-    /// DatePicker. Default = 7 days ago, in the user's local time;
+    /// CalendarDatePicker. Default = 7 days ago, in the user's local time;
     /// converted to UTC at query time. Null is treated as "since the
     /// epoch" — i.e. show everything — but the UI defaults this to a
     /// sensible recent value so the result list is never overwhelming.
@@ -188,7 +193,7 @@ public sealed partial class SnapshotsViewModel : ObservableObject
         = DateTimeOffset.Now.Date.AddDays(-7);
 
     [ObservableProperty] private string _recentChangesStatus
-        = "Pick a date and Refresh to see what's changed.";
+        = "Pick a date and click Find changes to see what's changed.";
 
     [ObservableProperty] private bool _isRecentChangesBusy;
     [ObservableProperty] private int  _recentChangesSelectedCount;
@@ -196,6 +201,72 @@ public sealed partial class SnapshotsViewModel : ObservableObject
 
     /// <summary>Tri-state for the recent-changes header select-all.</summary>
     [ObservableProperty] private bool? _allRecentChangesChecked = false;
+
+    // --- Recent changes filter + sort (mirrors the Entries grid pattern) ---
+
+    /// <summary>Distinct schema values in the current result set; user
+    /// ticks / unticks via the Schema column's funnel flyout.</summary>
+    public ObservableCollection<DiffFilterValue> RecentChangesSchemaFilterValues { get; } = new();
+
+    /// <summary>Distinct object-type values in the current result set;
+    /// ticked via the Object Type column's funnel flyout.</summary>
+    public ObservableCollection<DiffFilterValue> RecentChangesKindFilterValues   { get; } = new();
+
+    [ObservableProperty] private NameSortDirection _recentChangesNameSortMode     = NameSortDirection.None;
+
+    /// <summary>Default Desc — server returns newest first, the inline
+    /// arrow reflects that so the column header isn't lying.</summary>
+    [ObservableProperty] private NameSortDirection _recentChangesModifiedSortMode = NameSortDirection.Desc;
+
+    public string RecentChangesNameSortIndicator => RecentChangesNameSortMode switch
+    {
+        NameSortDirection.Asc  => "▲",
+        NameSortDirection.Desc => "▼",
+        _                       => "",
+    };
+    public string RecentChangesModifiedSortIndicator => RecentChangesModifiedSortMode switch
+    {
+        NameSortDirection.Asc  => "▲",
+        NameSortDirection.Desc => "▼",
+        _                       => "",
+    };
+
+    partial void OnRecentChangesNameSortModeChanged(NameSortDirection value)
+    {
+        OnPropertyChanged(nameof(RecentChangesNameSortIndicator));
+        if (value != NameSortDirection.None && RecentChangesModifiedSortMode != NameSortDirection.None)
+            RecentChangesModifiedSortMode = NameSortDirection.None;
+        ApplyRecentChangesFilter();
+    }
+    partial void OnRecentChangesModifiedSortModeChanged(NameSortDirection value)
+    {
+        OnPropertyChanged(nameof(RecentChangesModifiedSortIndicator));
+        if (value != NameSortDirection.None && RecentChangesNameSortMode != NameSortDirection.None)
+            RecentChangesNameSortMode = NameSortDirection.None;
+        ApplyRecentChangesFilter();
+    }
+
+    [RelayCommand]
+    private void ToggleRecentChangesNameSort()
+    {
+        RecentChangesNameSortMode = RecentChangesNameSortMode switch
+        {
+            NameSortDirection.None => NameSortDirection.Asc,
+            NameSortDirection.Asc  => NameSortDirection.Desc,
+            _                       => NameSortDirection.None,
+        };
+    }
+
+    [RelayCommand]
+    private void ToggleRecentChangesModifiedSort()
+    {
+        RecentChangesModifiedSortMode = RecentChangesModifiedSortMode switch
+        {
+            NameSortDirection.None => NameSortDirection.Asc,
+            NameSortDirection.Asc  => NameSortDirection.Desc,
+            _                       => NameSortDirection.None,
+        };
+    }
 
     /// <summary>Glyph painted inside the column-header select-all Button.</summary>
     public string RecentChangesSelectAllGlyph => AllRecentChangesChecked switch
@@ -1262,7 +1333,8 @@ public sealed partial class SnapshotsViewModel : ObservableObject
 
         // Detach IsSelected listeners on the OLD set before clearing,
         // so RefreshSelectionCount doesn't churn against stale items.
-        foreach (var r in RecentChanges) r.PropertyChanged -= OnRecentChangePropertyChanged;
+        foreach (var r in _allRecentChanges) r.PropertyChanged -= OnRecentChangePropertyChanged;
+        _allRecentChanges = new List<RecentChangeRowVm>();
         RecentChanges.Clear();
         RecentChangesSelectedCount = 0;
         HasRecentChangesSelection  = false;
@@ -1277,12 +1349,16 @@ public sealed partial class SnapshotsViewModel : ObservableObject
             // CPU + I/O — keep the UI thread free.
             var items = await Task.Run(() => fetcher.FetchChangedSinceAsync(conn!, sinceUtc));
 
+            _allRecentChanges = new List<RecentChangeRowVm>(items.Count);
             foreach (var m in items)
             {
                 var row = new RecentChangeRowVm(m);
                 row.PropertyChanged += OnRecentChangePropertyChanged;
-                RecentChanges.Add(row);
+                _allRecentChanges.Add(row);
             }
+            RebuildRecentChangesFilterValues();
+            ApplyRecentChangesFilter();
+
             RecentChangesStatus = items.Count switch
             {
                 0 => $"No objects changed since {sinceUtc:yyyy-MM-dd HH:mm} UTC.",
@@ -1293,12 +1369,88 @@ public sealed partial class SnapshotsViewModel : ObservableObject
         catch (Exception ex)
         {
             RecentChangesStatus = $"Error: {ex.Message}";
-            _svc.Toasts.Error("Refresh failed", ex.Message);
+            _svc.Toasts.Error("Find failed", ex.Message);
         }
         finally
         {
             IsRecentChangesBusy = false;
         }
+    }
+
+    /// <summary>
+    /// Rebuild the visible <see cref="RecentChanges"/> from
+    /// <see cref="_allRecentChanges"/> respecting:
+    ///   • Schema filter (ticked values in RecentChangesSchemaFilterValues)
+    ///   • Object Type filter (ticked values in RecentChangesKindFilterValues)
+    ///   • Name OR Modified sort (one or the other; mutually exclusive)
+    /// Mirrors ApplyEntryFilter exactly so the two grids behave the same.
+    /// </summary>
+    private void ApplyRecentChangesFilter()
+    {
+        RecentChanges.Clear();
+
+        var allowedSchemas = RecentChangesSchemaFilterValues
+            .Where(v => v.IsIncluded)
+            .Select(v => v.Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var allowedKinds = RecentChangesKindFilterValues
+            .Where(v => v.IsIncluded)
+            .Select(v => v.Value)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        IEnumerable<RecentChangeRowVm> source = _allRecentChanges;
+        if (RecentChangesNameSortMode == NameSortDirection.Asc)
+            source = source.OrderBy(r => r.FullName, StringComparer.OrdinalIgnoreCase);
+        else if (RecentChangesNameSortMode == NameSortDirection.Desc)
+            source = source.OrderByDescending(r => r.FullName, StringComparer.OrdinalIgnoreCase);
+        else if (RecentChangesModifiedSortMode == NameSortDirection.Asc)
+            source = source.OrderBy(r => r.ModifiedAtUtc);
+        else if (RecentChangesModifiedSortMode == NameSortDirection.Desc)
+            source = source.OrderByDescending(r => r.ModifiedAtUtc);
+
+        foreach (var r in source)
+        {
+            if (RecentChangesSchemaFilterValues.Count > 0 && !allowedSchemas.Contains(r.Schema)) continue;
+            if (RecentChangesKindFilterValues.Count   > 0 && !allowedKinds.Contains(r.Kind))     continue;
+            RecentChanges.Add(r);
+        }
+        RefreshRecentChangesSelectionState();
+    }
+
+    /// <summary>
+    /// Build the distinct schema + kind value lists from the master
+    /// <see cref="_allRecentChanges"/>. Called once per Find query.
+    /// All values default to ticked so the first view shows everything.
+    /// </summary>
+    private void RebuildRecentChangesFilterValues()
+    {
+        foreach (var v in RecentChangesSchemaFilterValues) v.PropertyChanged -= OnRecentChangesFilterValueChanged;
+        foreach (var v in RecentChangesKindFilterValues)   v.PropertyChanged -= OnRecentChangesFilterValueChanged;
+        RecentChangesSchemaFilterValues.Clear();
+        RecentChangesKindFilterValues.Clear();
+
+        foreach (var s in _allRecentChanges.Select(r => r.Schema)
+                                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                                            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase))
+        {
+            var v = new DiffFilterValue(s);
+            v.PropertyChanged += OnRecentChangesFilterValueChanged;
+            RecentChangesSchemaFilterValues.Add(v);
+        }
+        foreach (var k in _allRecentChanges.Select(r => r.Kind)
+                                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                                            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase))
+        {
+            var v = new DiffFilterValue(k);
+            v.PropertyChanged += OnRecentChangesFilterValueChanged;
+            RecentChangesKindFilterValues.Add(v);
+        }
+    }
+
+    private void OnRecentChangesFilterValueChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DiffFilterValue.IsIncluded))
+            ApplyRecentChangesFilter();
     }
 
     /// <summary>
@@ -1328,7 +1480,11 @@ public sealed partial class SnapshotsViewModel : ObservableObject
             _svc.Toasts.Warning("Pick a connection", "Select an endpoint first.");
             return;
         }
-        var selected = RecentChanges.Where(r => r.IsSelected).ToList();
+        // Send EVERY ticked row across the master list — a row ticked
+        // before the user changed the filter shouldn't be silently
+        // dropped just because it's currently hidden. Mirrors the diff
+        // grid's SendDiffToBatch behaviour.
+        var selected = _allRecentChanges.Where(r => r.IsSelected).ToList();
         if (selected.Count == 0)
         {
             _svc.Toasts.Warning("Nothing ticked", "Tick rows in the recent-changes grid first.");
@@ -1349,15 +1505,22 @@ public sealed partial class SnapshotsViewModel : ObservableObject
             RefreshRecentChangesSelectionState();
     }
 
+    /// <summary>
+    /// Selection-count + header-checked state. Total count + Send-to-
+    /// Batch availability come from the master list (so a ticked row
+    /// behind a filter still counts), but the header tri-state reflects
+    /// the *visible* rows since that's what its click toggles.
+    /// </summary>
     private void RefreshRecentChangesSelectionState()
     {
-        var total = RecentChanges.Count;
-        var c     = RecentChanges.Count(r => r.IsSelected);
-        RecentChangesSelectedCount = c;
-        HasRecentChangesSelection  = c > 0;
-        AllRecentChangesChecked    = total == 0 ? false
-                                   : c == 0      ? false
-                                   : c == total  ? true
-                                   : (bool?)null;
+        RecentChangesSelectedCount = _allRecentChanges.Count(r => r.IsSelected);
+        HasRecentChangesSelection  = RecentChangesSelectedCount > 0;
+
+        var visTotal = RecentChanges.Count;
+        var visTicked = RecentChanges.Count(r => r.IsSelected);
+        AllRecentChangesChecked = visTotal == 0       ? false
+                                : visTicked == 0      ? false
+                                : visTicked == visTotal ? true
+                                : (bool?)null;
     }
 }
