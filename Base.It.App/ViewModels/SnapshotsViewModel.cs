@@ -218,6 +218,16 @@ public sealed partial class SnapshotsViewModel : ObservableObject
     /// arrow reflects that so the column header isn't lying.</summary>
     [ObservableProperty] private NameSortDirection _recentChangesModifiedSortMode = NameSortDirection.Desc;
 
+    /// <summary>
+    /// Free-text filter applied to the recent-changes grid in addition to
+    /// the schema / kind funnel filters. Matches against
+    /// <c>FullName</c> + <c>Kind</c> case-insensitively, mirroring the
+    /// snapshot Entries grid's <see cref="EntryFilter"/> behaviour.
+    /// </summary>
+    [ObservableProperty] private string _recentChangesNameFilter = "";
+
+    partial void OnRecentChangesNameFilterChanged(string value) => ApplyRecentChangesFilter();
+
     public string RecentChangesNameSortIndicator => RecentChangesNameSortMode switch
     {
         NameSortDirection.Asc  => "▲",
@@ -1388,6 +1398,7 @@ public sealed partial class SnapshotsViewModel : ObservableObject
     private void ApplyRecentChangesFilter()
     {
         RecentChanges.Clear();
+        var f = (RecentChangesNameFilter ?? "").Trim();
 
         var allowedSchemas = RecentChangesSchemaFilterValues
             .Where(v => v.IsIncluded)
@@ -1412,6 +1423,13 @@ public sealed partial class SnapshotsViewModel : ObservableObject
         {
             if (RecentChangesSchemaFilterValues.Count > 0 && !allowedSchemas.Contains(r.Schema)) continue;
             if (RecentChangesKindFilterValues.Count   > 0 && !allowedKinds.Contains(r.Kind))     continue;
+            if (!string.IsNullOrEmpty(f))
+            {
+                var matchText =
+                       r.FullName.Contains(f, StringComparison.OrdinalIgnoreCase)
+                    || r.Kind.Contains(f, StringComparison.OrdinalIgnoreCase);
+                if (!matchText) continue;
+            }
             RecentChanges.Add(r);
         }
         RefreshRecentChangesSelectionState();
@@ -1503,6 +1521,22 @@ public sealed partial class SnapshotsViewModel : ObservableObject
     {
         if (e.PropertyName == nameof(RecentChangeRowVm.IsSelected))
             RefreshRecentChangesSelectionState();
+    }
+
+    /// <summary>
+    /// Surface a toast after the view copies a batch of object names to
+    /// the clipboard. View owns the actual copy (clipboard access lives
+    /// on the visual tree); the VM just owns the feedback channel so
+    /// every grid on the page can route through the same toast service
+    /// without each view code-behind having to know about
+    /// <c>AppServices.Toasts</c>.
+    /// </summary>
+    public void NotifyCopied(int count)
+    {
+        if (count <= 0) return;
+        _svc.Toasts.Info(
+            "Copied to clipboard",
+            count == 1 ? "1 object name copied." : $"{count} object names copied.");
     }
 
     /// <summary>

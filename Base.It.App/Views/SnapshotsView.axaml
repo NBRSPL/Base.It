@@ -151,9 +151,30 @@
                         <Border BorderThickness="1"
                                 BorderBrush="{DynamicResource App.StrokeBrush}"
                                 CornerRadius="4"
-                                MaxHeight="260"
+                                MaxHeight="290"
                                 IsVisible="{Binding RecentChanges.Count}">
                             <DockPanel>
+                                <!-- Mini search strip — same shape as the
+                                     snapshot Entries filter so the two grids
+                                     feel identical. Right-aligned + 240 wide
+                                     so it doesn't compete with the column
+                                     header below. Live-bound: filters as the
+                                     user types, no Apply button needed. -->
+                                <Border DockPanel.Dock="Top"
+                                        Background="{DynamicResource App.WindowBgBrush}"
+                                        BorderBrush="{DynamicResource App.StrokeBrush}"
+                                        BorderThickness="0,0,0,1"
+                                        Padding="8,5">
+                                    <Grid ColumnDefinitions="*,Auto">
+                                        <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                                                   FontSize="11" Opacity="0.55"
+                                                   Text="Search the result. Tip: tick rows and press Ctrl+C to copy their object names."/>
+                                        <TextBox  Grid.Column="1" x:Name="RecentChangesFilterBox"
+                                                  Width="240" MinHeight="26"
+                                                  Text="{Binding RecentChangesNameFilter, Mode=TwoWay}"
+                                                  Watermark="Filter by name or object type…"/>
+                                    </Grid>
+                                </Border>
                                 <!-- Custom column header — same shape as the
                                      snapshot Entries grid (filter flyouts on
                                      Schema + Object Type, sort arrows on
@@ -299,12 +320,15 @@
                                     </Grid>
                                 </Border>
 
-                                <DataGrid ItemsSource="{Binding RecentChanges}"
+                                <DataGrid x:Name="RecentChangesGrid"
+                                          ItemsSource="{Binding RecentChanges}"
                                           AutoGenerateColumns="False"
                                           HeadersVisibility="None"
                                           GridLinesVisibility="Horizontal"
                                           CanUserReorderColumns="False"
-                                          SelectionMode="Single">
+                                          SelectionMode="Extended"
+                                          ClipboardCopyMode="None"
+                                          KeyDown="OnRecentChangesGridKeyDown">
                                     <DataGrid.Columns>
                                         <DataGridTemplateColumn Width="40" CanUserResize="False" CanUserSort="False">
                                             <DataGridTemplateColumn.CellTemplate>
@@ -624,13 +648,16 @@
                                         </Grid>
                                     </Border>
 
-                                    <DataGrid ItemsSource="{Binding Entries}"
+                                    <DataGrid x:Name="EntriesGrid"
+                                              ItemsSource="{Binding Entries}"
                                               SelectedItem="{Binding SelectedEntry}"
                                               AutoGenerateColumns="False"
                                               GridLinesVisibility="Horizontal"
                                               HeadersVisibility="None"
                                               CanUserReorderColumns="False"
-                                              SelectionMode="Single"
+                                              SelectionMode="Extended"
+                                              ClipboardCopyMode="None"
+                                              KeyDown="OnEntriesGridKeyDown"
                                               IsReadOnly="True"
                                               IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNotNull}}">
                                         <DataGrid.Columns>
@@ -1042,7 +1069,9 @@
                                           AutoGenerateColumns="False"
                                           GridLinesVisibility="Horizontal"
                                           HeadersVisibility="None"
-                                          SelectionMode="Single"
+                                          SelectionMode="Extended"
+                                          ClipboardCopyMode="None"
+                                          KeyDown="OnDiffGridKeyDown"
                                           HorizontalAlignment="Stretch">
                                     <DataGrid.Columns>
                                         <!-- col 0: row select Button. Header version of

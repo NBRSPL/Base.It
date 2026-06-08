@@ -3,6 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Base.It.App.Services;
 using Base.It.App.ViewModels;
 
 namespace Base.It.App.Views;
@@ -261,16 +262,40 @@ public partial class BatchView : UserControl
 
     /// <summary>
     /// Excel-like keys on the items grid:
+    ///   Ctrl+C  → copy the Name of each selected row (ticked rows win
+    ///             over highlighted rows), one per line. Replaces the
+    ///             built-in DataGrid copy (which produced TSV-shaped cell
+    ///             dumps unsuited to pasting back into Batch). The grid
+    ///             has ClipboardCopyMode="None" in XAML so the built-in
+    ///             handler doesn't fight this one.
     ///   Ctrl+V  → paste newline-separated names from the clipboard.
     ///   Delete  → remove every selected row.
-    /// Ctrl+C is built into Avalonia's DataGrid via ClipboardCopyMode,
-    /// so we don't intercept it. Drag/Shift/Ctrl multi-select is the
-    /// standard Extended-mode behaviour.
+    /// Drag/Shift/Ctrl multi-select is the standard Extended-mode behaviour.
     /// </summary>
     private async void OnGridKeyDown(object? sender, KeyEventArgs e)
     {
         if (DataContext is not BatchViewModel vm) return;
         if (sender is not DataGrid grid) return;
+
+        if (e.Key == Key.C && e.KeyModifiers.HasFlag(KeyModifiers.Control))
+        {
+            // Ticked rows are the user's curated set (the same set
+            // Execute Selected / Remove Selected act on); fall back to
+            // highlight selection if nothing's ticked.
+            var ticked      = vm.Items.Where(i => i.IsSelected).ToList();
+            var highlighted = grid.SelectedItems.OfType<BatchItem>().ToList();
+            var copied = await GridCopyHelper.CopyFullNamesAsync<BatchItem>(
+                top:              TopLevel.GetTopLevel(this),
+                tickedItems:      ticked,
+                highlightedItems: highlighted,
+                getFullName:      i => i.Name);
+            if (copied > 0)
+            {
+                e.Handled = true;
+                vm.NotifyCopied(copied);
+            }
+            return;
+        }
 
         if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {

@@ -1173,6 +1173,21 @@ public sealed partial class BatchViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Surface a toast after the view copies a batch of object names to
+    /// the clipboard. View owns the clipboard call (TopLevel access lives
+    /// in the visual tree); VM just routes the count into the shared
+    /// toast service so the user gets the same confirmation shape Batch
+    /// uses elsewhere ("Pasted from clipboard", "Rows removed", …).
+    /// </summary>
+    public void NotifyCopied(int count)
+    {
+        if (count <= 0) return;
+        _svc.Toasts.Info(
+            "Copied to clipboard",
+            count == 1 ? "1 object name copied." : $"{count} object names copied.");
+    }
+
+    /// <summary>
     /// Append items from clipboard / external paste. Splits on CR/LF,
     /// trims each line, drops blanks, and skips entries that are
     /// already in <see cref="Items"/> (case-insensitive on Name) so a

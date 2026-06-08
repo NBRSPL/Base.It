@@ -1,8 +1,10 @@
+using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
+using Base.It.App.Services;
 using Base.It.App.ViewModels;
 
 namespace Base.It.App.Views;
@@ -164,6 +166,84 @@ public partial class SnapshotsView : UserControl, ISupportsFind
         if (DataContext is not SnapshotsViewModel vm) return;
         if (!row.IsEditing) return;
         await vm.CommitRenameSnapshotAsync(row);
+    }
+
+    /// <summary>
+    /// Ctrl+C on the Snapshot Entries grid → copy the FullName of each
+    /// highlighted row to the clipboard, one per line. No checkbox column
+    /// here (entries are a flat list), so the "ticked rows win" rule that
+    /// covers Recent Changes / Diff doesn't apply — pass null for the
+    /// ticked set and the helper falls back to grid.SelectedItems.
+    /// </summary>
+    private async void OnEntriesGridKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.C || !e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        if (sender is not DataGrid grid) return;
+        if (DataContext is not SnapshotsViewModel vm) return;
+
+        var highlighted = grid.SelectedItems.OfType<SnapshotEntryVm>().ToList();
+        var copied = await GridCopyHelper.CopyFullNamesAsync<SnapshotEntryVm>(
+            top:              TopLevel.GetTopLevel(this),
+            tickedItems:      null,
+            highlightedItems: highlighted,
+            getFullName:      r => r.FullName);
+        if (copied > 0)
+        {
+            e.Handled = true;
+            vm.NotifyCopied(copied);
+        }
+    }
+
+    /// <summary>
+    /// Ctrl+C on the Recent Changes grid → copy FullNames. Ticked rows
+    /// (IsSelected via the checkbox column) win when present so the user
+    /// can build a curated list with the checkbox and copy it without
+    /// also having to shift-click highlight; otherwise fall back to the
+    /// highlight selection.
+    /// </summary>
+    private async void OnRecentChangesGridKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.C || !e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        if (sender is not DataGrid grid) return;
+        if (DataContext is not SnapshotsViewModel vm) return;
+
+        var ticked      = vm.RecentChanges.Where(r => r.IsSelected).ToList();
+        var highlighted = grid.SelectedItems.OfType<RecentChangeRowVm>().ToList();
+        var copied = await GridCopyHelper.CopyFullNamesAsync<RecentChangeRowVm>(
+            top:              TopLevel.GetTopLevel(this),
+            tickedItems:      ticked,
+            highlightedItems: highlighted,
+            getFullName:      r => r.FullName);
+        if (copied > 0)
+        {
+            e.Handled = true;
+            vm.NotifyCopied(copied);
+        }
+    }
+
+    /// <summary>
+    /// Ctrl+C on the cross-store Compare diff grid → copy FullNames.
+    /// Same rule as Recent Changes: ticked rows (the user's promote
+    /// list) win over highlighted rows.
+    /// </summary>
+    private async void OnDiffGridKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.C || !e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+        if (sender is not DataGrid grid) return;
+        if (DataContext is not SnapshotsViewModel vm) return;
+
+        var ticked      = vm.DiffRows.Where(r => r.IsSelected).ToList();
+        var highlighted = grid.SelectedItems.OfType<SnapshotDiffRowVm>().ToList();
+        var copied = await GridCopyHelper.CopyFullNamesAsync<SnapshotDiffRowVm>(
+            top:              TopLevel.GetTopLevel(this),
+            tickedItems:      ticked,
+            highlightedItems: highlighted,
+            getFullName:      r => r.FullName);
+        if (copied > 0)
+        {
+            e.Handled = true;
+            vm.NotifyCopied(copied);
+        }
     }
 
     /// <summary>
