@@ -213,6 +213,67 @@ WHERE o.is_ms_shipped = 0
         return list;
     }
 
+    /// <summary>
+    /// "What changed since X?" — returns every user object whose
+    /// <c>sys.objects.modify_date</c> is at or after <paramref name="sinceUtc"/>.
+    /// Powers the Snapshots "Recent changes" panel: pick a date, hit
+    /// Refresh, see the procs / views / tables / triggers / functions
+    /// touched since then, ticked rows hand off to Batch via the
+    /// existing SendToBatchPayload route. Server-side ORDER BY puts the
+    /// freshest changes first.
+    ///
+    /// Caveats: <c>modify_date</c> tracks definition changes (ALTER,
+    /// DROP+CREATE, schema), not data changes (INSERT / UPDATE / DELETE
+    /// don't bump it). Triggers have their own modify_date — changing
+    /// a trigger doesn't bump its parent table's. SSMS-style design
+    /// changes that drop+recreate reset <c>create_date</c> too. So
+    /// this is a useful "what's been touched lately" signal, not an
+    /// audit log.
+    /// </summary>
+    public async Task<IReadOnlyList<ObjectMetadata>> FetchChangedSinceAsync(
+        string connectionString,
+        DateTime sinceUtc,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return Array.Empty<ObjectMetadata>();
+
+        const string Sql = NonBlockingPreamble + @"
+SELECT
+    o.object_id,
+    SCHEMA_NAME(o.schema_id) AS schema_name,
+    o.name                   AS object_name,
+    o.type                   AS type_code,
+    o.modify_date            AS modify_date
+FROM sys.objects o
+WHERE o.is_ms_shipped = 0
+  AND o.modify_date >= @since
+" + AllUserObjectTypesFilter + @"
+ORDER BY o.modify_date DESC, schema_name, o.name";
+
+        var list = new List<ObjectMetadata>(64);
+        await using var conn = new SqlConnection(WithFastPacketSize(connectionString));
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(Sql, conn) { CommandTimeout = 60 };
+        cmd.Parameters.Add("@since", System.Data.SqlDbType.DateTime2).Value =
+            DateTime.SpecifyKind(sinceUtc, DateTimeKind.Unspecified);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var oid    = reader.GetInt32(0);
+            var schema = reader.GetString(1);
+            var name   = reader.GetString(2);
+            var code   = reader.GetString(3).Trim().ToUpperInvariant();
+            var modify = DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc);
+
+            var kind = TypeCodeToKind(code);
+            if (kind == SqlObjectType.Unknown) continue;
+
+            list.Add(new ObjectMetadata(oid, schema, name, kind, modify));
+        }
+        return list;
+    }
+
     public async Task<FetchResult> FetchByObjectIdsAsync(
         string connectionString,
         IReadOnlyList<int> objectIds,

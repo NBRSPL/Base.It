@@ -96,6 +96,186 @@
                     </Grid>
                 </Border>
 
+                <!-- ─────────── Recent changes panel ───────────
+                     "What was changed since X?" — direct read of
+                     sys.objects.modify_date on the picked endpoint, no
+                     snapshot required. Collapsed by default (Expander
+                     header is a single thin row) so it never takes
+                     space unless the user clicks into it. Compact
+                     control row: Since + Refresh + status + Send-to-
+                     Batch. Result grid uses the same external-header
+                     pattern as the compare grid, capped at 240 px so
+                     it never dominates the page. -->
+                <Expander Header="Recent changes (sys.objects.modify_date)"
+                          IsExpanded="False" Margin="0,0,0,8">
+                    <DockPanel>
+                        <!-- Controls row -->
+                        <Grid DockPanel.Dock="Top"
+                              ColumnDefinitions="Auto,Auto,Auto,*,Auto"
+                              Margin="0,0,0,6">
+                            <TextBlock Grid.Column="0" Text="Since"
+                                       VerticalAlignment="Center"
+                                       FontSize="11" Opacity="0.7"
+                                       Margin="0,0,8,0"/>
+                            <DatePicker Grid.Column="1"
+                                        SelectedDate="{Binding RecentChangesSince, Mode=TwoWay}"
+                                        MinHeight="30"
+                                        VerticalAlignment="Center"/>
+                            <Button Grid.Column="2"
+                                    Content="Refresh" Margin="8,0,0,0" MinHeight="30"
+                                    Command="{Binding RefreshRecentChangesCommand}"
+                                    IsEnabled="{Binding !IsRecentChangesBusy}"
+                                    ToolTip.Tip="Re-query sys.objects for changes since the picked date."/>
+                            <TextBlock Grid.Column="3"
+                                       Text="{Binding RecentChangesStatus}"
+                                       VerticalAlignment="Center"
+                                       FontSize="11" Opacity="0.6"
+                                       Margin="12,0,12,0"
+                                       TextTrimming="CharacterEllipsis"/>
+                            <Button Grid.Column="4" Classes="accent"
+                                    Content="Send to Batch →" MinHeight="30"
+                                    Command="{Binding SendRecentChangesToBatchCommand}"
+                                    IsEnabled="{Binding HasRecentChangesSelection}"
+                                    ToolTip.Tip="Open the Batch screen pre-filled with the ticked objects."/>
+                        </Grid>
+
+                        <!-- Result grid. Hidden when nothing's been
+                             fetched yet so the Expander body collapses
+                             cleanly until Refresh has produced rows. -->
+                        <Border BorderThickness="1"
+                                BorderBrush="{DynamicResource App.StrokeBrush}"
+                                CornerRadius="4"
+                                MaxHeight="240"
+                                IsVisible="{Binding RecentChanges.Count}">
+                            <DockPanel>
+                                <!-- Custom column header — same shape as the
+                                     compare grid's external header so the
+                                     row-checkbox / column-label alignment is
+                                     pixel-identical. ColumnDefinitions MUST
+                                     match the DataGrid's Columns widths below. -->
+                                <Border DockPanel.Dock="Top"
+                                        Background="{DynamicResource App.ElevatedBgBrush}"
+                                        BorderBrush="{DynamicResource App.StrokeBrush}"
+                                        BorderThickness="0,0,0,1">
+                                    <Grid ColumnDefinitions="40,90,*,120,140" Margin="0,7">
+                                        <!-- Select-all Button (Button-styled-as-CheckBox
+                                             so it visually matches the row cells; Avalonia
+                                             DataGrid won't render a real CheckBox in a
+                                             header). -->
+                                        <Button Grid.Column="0"
+                                                Width="20" Height="20"
+                                                Padding="0"
+                                                MinWidth="0" MinHeight="0"
+                                                CornerRadius="3"
+                                                Background="Transparent"
+                                                BorderBrush="{DynamicResource App.StrokeStrongBrush}"
+                                                BorderThickness="2"
+                                                HorizontalAlignment="Center"
+                                                VerticalAlignment="Center"
+                                                HorizontalContentAlignment="Center"
+                                                VerticalContentAlignment="Center"
+                                                Command="{Binding ToggleAllRecentChangesCommand}"
+                                                ToolTip.Tip="Tick / untick every visible row.">
+                                            <TextBlock Text="{Binding RecentChangesSelectAllGlyph}"
+                                                       FontSize="12" FontWeight="Bold"
+                                                       LineHeight="14"
+                                                       TextAlignment="Center"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center"/>
+                                        </Button>
+                                        <TextBlock Grid.Column="1" Text="Schema"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   Padding="6,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                        <TextBlock Grid.Column="2" Text="Name"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   Padding="6,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                        <TextBlock Grid.Column="3" Text="Object Type"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   Padding="6,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                        <TextBlock Grid.Column="4" Text="Modified (UTC)"
+                                                   FontSize="11" FontWeight="SemiBold"
+                                                   Padding="6,0,0,0"
+                                                   VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                    </Grid>
+                                </Border>
+
+                                <DataGrid ItemsSource="{Binding RecentChanges}"
+                                          AutoGenerateColumns="False"
+                                          HeadersVisibility="None"
+                                          GridLinesVisibility="Horizontal"
+                                          CanUserReorderColumns="False"
+                                          SelectionMode="Single">
+                                    <DataGrid.Columns>
+                                        <!-- col 0: row select (same Button primitive as the header) -->
+                                        <DataGridTemplateColumn Width="40" CanUserResize="False" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:RecentChangeRowVm">
+                                                    <Button Width="20" Height="20"
+                                                            Padding="0"
+                                                            MinWidth="0" MinHeight="0"
+                                                            CornerRadius="3"
+                                                            Background="Transparent"
+                                                            BorderBrush="{DynamicResource App.StrokeStrongBrush}"
+                                                            BorderThickness="2"
+                                                            HorizontalAlignment="Center"
+                                                            VerticalAlignment="Center"
+                                                            HorizontalContentAlignment="Center"
+                                                            VerticalContentAlignment="Center"
+                                                            Command="{Binding ToggleSelectionCommand}">
+                                                        <TextBlock Text="✓"
+                                                                   FontSize="12" FontWeight="Bold"
+                                                                   LineHeight="14"
+                                                                   TextAlignment="Center"
+                                                                   HorizontalAlignment="Center"
+                                                                   VerticalAlignment="Center"
+                                                                   IsVisible="{Binding IsSelected}"/>
+                                                    </Button>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Width="90" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:RecentChangeRowVm">
+                                                    <TextBlock Text="{Binding Schema}" VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Width="*" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:RecentChangeRowVm">
+                                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" Padding="6,0,0,0" TextTrimming="CharacterEllipsis"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Width="120" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:RecentChangeRowVm">
+                                                    <TextBlock Text="{Binding Kind}" VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                        <DataGridTemplateColumn Width="140" CanUserSort="False">
+                                            <DataGridTemplateColumn.CellTemplate>
+                                                <DataTemplate DataType="vm:RecentChangeRowVm">
+                                                    <TextBlock Text="{Binding ModifiedAtUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}"
+                                                               VerticalAlignment="Center" Padding="6,0,0,0"/>
+                                                </DataTemplate>
+                                            </DataGridTemplateColumn.CellTemplate>
+                                        </DataGridTemplateColumn>
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </Border>
+                    </DockPanel>
+                </Expander>
+
                 <!-- ─────────── Snapshot browser ───────────
                      MaxHeight=400 caps the section. MinHeight is bound to
                      the VM — 0 when no snapshot is picked (truly collapses

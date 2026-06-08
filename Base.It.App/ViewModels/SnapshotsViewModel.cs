@@ -128,6 +128,35 @@ public sealed partial class SnapshotDiffRowVm : ObservableObject
     private void ToggleSelection() => IsSelected = !IsSelected;
 }
 
+/// <summary>
+/// Row in the "Recent changes" panel — one entry per object whose
+/// <c>sys.objects.modify_date</c> is at or after the picked date.
+/// Lightweight wrapper around the Core's <c>ObjectMetadata</c> with
+/// just the columns the grid renders + an IsSelected for the
+/// Send-to-Batch tick.
+/// </summary>
+public sealed partial class RecentChangeRowVm : ObservableObject
+{
+    [ObservableProperty] private bool _isSelected;
+
+    public string   Schema        { get; }
+    public string   Name          { get; }
+    public string   Kind          { get; }
+    public DateTime ModifiedAtUtc { get; }
+    public string   FullName      => $"{Schema}.{Name}";
+
+    public RecentChangeRowVm(Base.It.Core.Schema.BulkSchemaFetcher.ObjectMetadata m)
+    {
+        Schema        = m.Schema;
+        Name          = m.Name;
+        Kind          = m.Kind.ToString();
+        ModifiedAtUtc = m.ModifyDateUtc;
+    }
+
+    [RelayCommand]
+    private void ToggleSelection() => IsSelected = !IsSelected;
+}
+
 public sealed partial class SnapshotsViewModel : ObservableObject
 {
     private readonly AppServices _svc;
@@ -137,6 +166,47 @@ public sealed partial class SnapshotsViewModel : ObservableObject
     public ObservableCollection<EndpointPick> Endpoints { get; } = new();
 
     [ObservableProperty] private EndpointPick? _selectedEndpoint;
+
+    // --- Recent changes panel ---------------------------------------
+    //
+    // Quick "what was changed since X?" lookup against the picked
+    // endpoint's catalog. Reads sys.objects.modify_date directly — no
+    // snapshot required. Bound to the Expander above the snapshot
+    // browser on the Snapshots screen. Send-to-Batch uses the same
+    // SendToBatchPayload route the diff panel uses.
+
+    public ObservableCollection<RecentChangeRowVm> RecentChanges { get; } = new();
+
+    /// <summary>
+    /// Date threshold for the "Recent changes" query. Bound to a
+    /// DatePicker. Default = 7 days ago, in the user's local time;
+    /// converted to UTC at query time. Null is treated as "since the
+    /// epoch" — i.e. show everything — but the UI defaults this to a
+    /// sensible recent value so the result list is never overwhelming.
+    /// </summary>
+    [ObservableProperty] private DateTimeOffset? _recentChangesSince
+        = DateTimeOffset.Now.Date.AddDays(-7);
+
+    [ObservableProperty] private string _recentChangesStatus
+        = "Pick a date and Refresh to see what's changed.";
+
+    [ObservableProperty] private bool _isRecentChangesBusy;
+    [ObservableProperty] private int  _recentChangesSelectedCount;
+    [ObservableProperty] private bool _hasRecentChangesSelection;
+
+    /// <summary>Tri-state for the recent-changes header select-all.</summary>
+    [ObservableProperty] private bool? _allRecentChangesChecked = false;
+
+    /// <summary>Glyph painted inside the column-header select-all Button.</summary>
+    public string RecentChangesSelectAllGlyph => AllRecentChangesChecked switch
+    {
+        true  => "✓",
+        null  => "–",
+        _     => "",
+    };
+
+    partial void OnAllRecentChangesCheckedChanged(bool? value)
+        => OnPropertyChanged(nameof(RecentChangesSelectAllGlyph));
 
     // --- Snapshot list + selected snapshot --------------------------
 
@@ -1159,4 +1229,135 @@ public sealed partial class SnapshotsViewModel : ObservableObject
     // the Entries-grid filter. The grid has its own filter textbox; the
     // two should stay separate (OS-standard Ctrl+F doesn't drive a list
     // filter elsewhere in the app either).
+
+    // ─── Recent changes panel commands ─────────────────────────────
+
+    /// <summary>
+    /// Hit sys.objects.modify_date on the currently-picked endpoint and
+    /// populate <see cref="RecentChanges"/> with everything touched
+    /// since <see cref="RecentChangesSince"/>. Pure read — no
+    /// snapshot store interaction.
+    /// </summary>
+    [RelayCommand]
+    private async Task RefreshRecentChangesAsync()
+    {
+        var ep = SelectedEndpoint;
+        if (ep is null)
+        {
+            _svc.Toasts.Warning("Pick a connection", "Select an endpoint first.");
+            return;
+        }
+        if (RecentChangesSince is null)
+        {
+            _svc.Toasts.Warning("Pick a date", "Pick a date threshold.");
+            return;
+        }
+
+        var conn = _svc.Connections.Get(ep.Environment, ep.Database);
+        if (string.IsNullOrWhiteSpace(conn))
+        {
+            _svc.Toasts.Error("No connection string", $"{ep.Environment}·{ep.Database} isn't configured.");
+            return;
+        }
+
+        // Detach IsSelected listeners on the OLD set before clearing,
+        // so RefreshSelectionCount doesn't churn against stale items.
+        foreach (var r in RecentChanges) r.PropertyChanged -= OnRecentChangePropertyChanged;
+        RecentChanges.Clear();
+        RecentChangesSelectedCount = 0;
+        HasRecentChangesSelection  = false;
+        AllRecentChangesChecked    = false;
+
+        IsRecentChangesBusy = true;
+        RecentChangesStatus = "Loading…";
+        try
+        {
+            var sinceUtc = RecentChangesSince.Value.UtcDateTime;
+            var fetcher  = new Base.It.Core.Schema.BulkSchemaFetcher();
+            // CPU + I/O — keep the UI thread free.
+            var items = await Task.Run(() => fetcher.FetchChangedSinceAsync(conn!, sinceUtc));
+
+            foreach (var m in items)
+            {
+                var row = new RecentChangeRowVm(m);
+                row.PropertyChanged += OnRecentChangePropertyChanged;
+                RecentChanges.Add(row);
+            }
+            RecentChangesStatus = items.Count switch
+            {
+                0 => $"No objects changed since {sinceUtc:yyyy-MM-dd HH:mm} UTC.",
+                1 => $"1 object changed since {sinceUtc:yyyy-MM-dd HH:mm} UTC.",
+                _ => $"{items.Count:N0} objects changed since {sinceUtc:yyyy-MM-dd HH:mm} UTC.",
+            };
+        }
+        catch (Exception ex)
+        {
+            RecentChangesStatus = $"Error: {ex.Message}";
+            _svc.Toasts.Error("Refresh failed", ex.Message);
+        }
+        finally
+        {
+            IsRecentChangesBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// Click on the recent-changes header select-all Button. Cycles:
+    /// any ticked → none; none → all visible. Same pattern as the
+    /// compare grid's ToggleAllDiffRows.
+    /// </summary>
+    [RelayCommand]
+    private void ToggleAllRecentChanges()
+    {
+        if (RecentChanges.Count == 0) return;
+        var anySelected = RecentChanges.Any(r => r.IsSelected);
+        foreach (var r in RecentChanges) r.IsSelected = !anySelected;
+    }
+
+    /// <summary>
+    /// Send the ticked recent-changes rows to the Batch screen for
+    /// execution. Source = the currently-picked snapshot endpoint;
+    /// targets are left empty — the user picks targets on Batch.
+    /// </summary>
+    [RelayCommand]
+    private void SendRecentChangesToBatch()
+    {
+        var ep = SelectedEndpoint;
+        if (ep is null)
+        {
+            _svc.Toasts.Warning("Pick a connection", "Select an endpoint first.");
+            return;
+        }
+        var selected = RecentChanges.Where(r => r.IsSelected).ToList();
+        if (selected.Count == 0)
+        {
+            _svc.Toasts.Warning("Nothing ticked", "Tick rows in the recent-changes grid first.");
+            return;
+        }
+        var names = selected.Select(r => r.FullName).ToList();
+        var payload = new SendToBatchPayload(
+            ObjectNames:    names,
+            SourceEnv:      ep.Environment,
+            SourceDatabase: ep.Database,
+            Targets:        Array.Empty<(string Environment, string Database)>());
+        SendToBatchRequested?.Invoke(payload);
+    }
+
+    private void OnRecentChangePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(RecentChangeRowVm.IsSelected))
+            RefreshRecentChangesSelectionState();
+    }
+
+    private void RefreshRecentChangesSelectionState()
+    {
+        var total = RecentChanges.Count;
+        var c     = RecentChanges.Count(r => r.IsSelected);
+        RecentChangesSelectedCount = c;
+        HasRecentChangesSelection  = c > 0;
+        AllRecentChangesChecked    = total == 0 ? false
+                                   : c == 0      ? false
+                                   : c == total  ? true
+                                   : (bool?)null;
+    }
 }
