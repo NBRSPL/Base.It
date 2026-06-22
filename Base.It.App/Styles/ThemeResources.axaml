@@ -64,16 +64,35 @@
             <Color x:Key="App.FieldErrorBgColor">#2A1418</Color>
 
             <!-- Diff highlight (used by Compare panes + Batch Preview).
-                 Dark: the BeyondCompare / WinMerge convention — saturated
-                 amber/gold so a changed line reads instantly as
-                 "highlighted with a marker", with high-contrast cream
-                 text on top. Same hue as the dark-mode warning brush
-                 family but distinctly more saturated so it doesn't get
-                 confused with a warning state. -->
+                 Two-tone palette (GitHub-dark family) so the char-aware
+                 differ can mark removed text in red and added text in
+                 green — meaningful at a glance and WCAG AA against
+                 the dark card background. The single "Diff" pair
+                 below is kept as a neutral fallback for the legacy
+                 N-way preview that doesn't compute side-specific
+                 segments — it stays amber so multi-target previews
+                 still read distinctly from a 2-side diff. -->
             <Color x:Key="App.DiffBgColor">#7A5A00</Color>
             <Color x:Key="App.DiffFgColor">#FFF4C2</Color>
-            <!-- Strong accent stripe on the left edge — saturated amber. -->
             <Color x:Key="App.DiffAccentColor">#FFC107</Color>
+            <!-- Removed (source side) — saturated deep red bg, pale red text. -->
+            <Color x:Key="App.DiffDelBgColor">#5C2333</Color>
+            <Color x:Key="App.DiffDelFgColor">#FFB3B3</Color>
+            <Color x:Key="App.DiffDelGutterColor">#F85149</Color>
+            <!-- Added (target side) — saturated deep green bg, pale green text. -->
+            <Color x:Key="App.DiffAddBgColor">#21392B</Color>
+            <Color x:Key="App.DiffAddFgColor">#B6F0B6</Color>
+            <Color x:Key="App.DiffAddGutterColor">#3FB950</Color>
+            <!-- Subtle whitespace-change marker — slightly lifted off the
+                 background so the eye sees the change without it
+                 competing with the actual edit highlight beside it. -->
+            <Color x:Key="App.DiffWhitespaceColor">#3A3A2A</Color>
+            <!-- Find-overlay match — same warmth in both themes so the
+                 Ctrl+F highlight is consistent regardless of mode. -->
+            <Color x:Key="App.FindMatchBgColor">#2E8B57</Color>
+            <Color x:Key="App.FindMatchFgColor">#FFFFFF</Color>
+            <!-- In-sync indicator used by Batch grid row ticks. -->
+            <Color x:Key="App.InSyncColor">#3FB950</Color>
 
             <!-- ==== Brushes (bind these from XAML) ==== -->
             <SolidColorBrush x:Key="App.WindowBgBrush" Color="{StaticResource App.WindowBgColor}"/>
@@ -121,6 +140,16 @@
             <SolidColorBrush x:Key="App.DiffBgBrush" Color="{StaticResource App.DiffBgColor}"/>
             <SolidColorBrush x:Key="App.DiffFgBrush" Color="{StaticResource App.DiffFgColor}"/>
             <SolidColorBrush x:Key="App.DiffAccentBrush" Color="{StaticResource App.DiffAccentColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelBgBrush" Color="{StaticResource App.DiffDelBgColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelFgBrush" Color="{StaticResource App.DiffDelFgColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelGutterBrush" Color="{StaticResource App.DiffDelGutterColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddBgBrush" Color="{StaticResource App.DiffAddBgColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddFgBrush" Color="{StaticResource App.DiffAddFgColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddGutterBrush" Color="{StaticResource App.DiffAddGutterColor}"/>
+            <SolidColorBrush x:Key="App.DiffWhitespaceBrush" Color="{StaticResource App.DiffWhitespaceColor}"/>
+            <SolidColorBrush x:Key="App.FindMatchBgBrush" Color="{StaticResource App.FindMatchBgColor}"/>
+            <SolidColorBrush x:Key="App.FindMatchFgBrush" Color="{StaticResource App.FindMatchFgColor}"/>
+            <SolidColorBrush x:Key="App.InSyncBrush" Color="{StaticResource App.InSyncColor}"/>
 
             <!-- Override FluentAvalonia tokens so existing bindings pick up the sharper palette -->
             <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>
@@ -204,13 +233,24 @@
             <Color x:Key="App.FieldErrorBgColor">#FDECEC</Color>
 
             <!-- Diff highlight (used by Compare panes + Batch Preview).
-                 Light: classic highlighter-pen yellow background with
-                 near-black text — the standard "this differs" treatment
-                 in BeyondCompare, WinMerge, KDiff3, etc. High punch on
-                 a white card without being a warning red/orange. -->
+                 Light theme equivalents of the dark palette above —
+                 GitHub-light family. Two-tone removed/added pairs for
+                 the char-aware differ, plus the legacy single amber for
+                 N-way mode. All hue + lightness chosen for WCAG AA on
+                 the white card background. -->
             <Color x:Key="App.DiffBgColor">#FFF176</Color>
             <Color x:Key="App.DiffFgColor">#1A1209</Color>
             <Color x:Key="App.DiffAccentColor">#F57F17</Color>
+            <Color x:Key="App.DiffDelBgColor">#FFDCE0</Color>
+            <Color x:Key="App.DiffDelFgColor">#82071E</Color>
+            <Color x:Key="App.DiffDelGutterColor">#CF222E</Color>
+            <Color x:Key="App.DiffAddBgColor">#CCFFD8</Color>
+            <Color x:Key="App.DiffAddFgColor">#0D4E1F</Color>
+            <Color x:Key="App.DiffAddGutterColor">#1A7F37</Color>
+            <Color x:Key="App.DiffWhitespaceColor">#F0F0EA</Color>
+            <Color x:Key="App.FindMatchBgColor">#FFE5A3</Color>
+            <Color x:Key="App.FindMatchFgColor">#3B2A00</Color>
+            <Color x:Key="App.InSyncColor">#1A7F37</Color>
 
             <!-- ==== Brushes ==== -->
             <SolidColorBrush x:Key="App.WindowBgBrush" Color="{StaticResource App.WindowBgColor}"/>
@@ -258,6 +298,16 @@
             <SolidColorBrush x:Key="App.DiffBgBrush" Color="{StaticResource App.DiffBgColor}"/>
             <SolidColorBrush x:Key="App.DiffFgBrush" Color="{StaticResource App.DiffFgColor}"/>
             <SolidColorBrush x:Key="App.DiffAccentBrush" Color="{StaticResource App.DiffAccentColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelBgBrush" Color="{StaticResource App.DiffDelBgColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelFgBrush" Color="{StaticResource App.DiffDelFgColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelGutterBrush" Color="{StaticResource App.DiffDelGutterColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddBgBrush" Color="{StaticResource App.DiffAddBgColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddFgBrush" Color="{StaticResource App.DiffAddFgColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddGutterBrush" Color="{StaticResource App.DiffAddGutterColor}"/>
+            <SolidColorBrush x:Key="App.DiffWhitespaceBrush" Color="{StaticResource App.DiffWhitespaceColor}"/>
+            <SolidColorBrush x:Key="App.FindMatchBgBrush" Color="{StaticResource App.FindMatchBgColor}"/>
+            <SolidColorBrush x:Key="App.FindMatchFgBrush" Color="{StaticResource App.FindMatchFgColor}"/>
+            <SolidColorBrush x:Key="App.InSyncBrush" Color="{StaticResource App.InSyncColor}"/>
 
             <!-- Override FluentAvalonia tokens -->
             <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>

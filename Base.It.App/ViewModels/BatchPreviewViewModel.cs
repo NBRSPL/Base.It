@@ -3,6 +3,7 @@ using Base.It.App.Services;
 using Base.It.Core.Diff;
 using Base.It.Core.Models;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 
 namespace Base.It.App.ViewModels;
 
@@ -57,6 +58,95 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
     [ObservableProperty] private string _status = "Fetching definitions…";
     [ObservableProperty] private bool   _isBusy;
     [ObservableProperty] private string _loadError = "";
+
+    /// <summary>
+    /// Line indices (0-based, in the first pane's Lines list) where a
+    /// change starts. Populated by <see cref="LoadAsync"/> /
+    /// <see cref="ForLiteralPair"/> after alignment runs. Empty when the
+    /// two sides match. Used by the change-navigation buttons in the
+    /// preview window — Next/Prev advance through this list.
+    /// </summary>
+    public IReadOnlyList<int> ChangeLineIndices { get; private set; } = Array.Empty<int>();
+
+    /// <summary>
+    /// Index INTO <see cref="ChangeLineIndices"/> the user is currently
+    /// parked on. <c>-1</c> means "not yet jumped to a change" — the
+    /// first Next click moves to index 0 and scrolls. Wraps at the
+    /// ends so navigation never dead-ends.
+    /// </summary>
+    [ObservableProperty] private int _currentChangeIndex = -1;
+
+    /// <summary>"N of M" label for the navigation toolbar.</summary>
+    public string ChangeNavigationLabel =>
+        ChangeLineIndices.Count == 0
+            ? "no changes"
+            : CurrentChangeIndex < 0
+                ? $"{ChangeLineIndices.Count} change{(ChangeLineIndices.Count == 1 ? "" : "s")}"
+                : $"{CurrentChangeIndex + 1} of {ChangeLineIndices.Count}";
+
+    /// <summary>True when there's at least one change to navigate to.</summary>
+    public bool HasChanges => ChangeLineIndices.Count > 0;
+
+    /// <summary>
+    /// Raised when Next / Prev is clicked. The view subscribes and
+    /// scrolls every pane to <see cref="CurrentChangeIndex"/>'s line
+    /// number. Kept as an event (not a binding) because scrolling is
+    /// imperative — the VM owns the WHERE, the view owns the HOW.
+    /// </summary>
+    public event Action<int>? ScrollToLineRequested;
+
+    partial void OnCurrentChangeIndexChanged(int value)
+        => OnPropertyChanged(nameof(ChangeNavigationLabel));
+
+    /// <summary>
+    /// Move the cursor to the next change and ask the view to scroll
+    /// there. Wraps to the first change after the last. No-op when the
+    /// plan has no changes.
+    /// </summary>
+    [RelayCommand]
+    private void NextChange()
+    {
+        if (ChangeLineIndices.Count == 0) return;
+        CurrentChangeIndex = (CurrentChangeIndex + 1) % ChangeLineIndices.Count;
+        ScrollToLineRequested?.Invoke(ChangeLineIndices[CurrentChangeIndex]);
+    }
+
+    /// <summary>Move the cursor to the previous change. Wraps to the last from index 0.</summary>
+    [RelayCommand]
+    private void PrevChange()
+    {
+        if (ChangeLineIndices.Count == 0) return;
+        CurrentChangeIndex = CurrentChangeIndex <= 0
+            ? ChangeLineIndices.Count - 1
+            : CurrentChangeIndex - 1;
+        ScrollToLineRequested?.Invoke(ChangeLineIndices[CurrentChangeIndex]);
+    }
+
+    /// <summary>
+    /// Recompute <see cref="ChangeLineIndices"/> from the current Panes
+    /// list. Picks the first pane that has at least one "Different"
+    /// line (typically the source side); change nav is anchored to
+    /// that pane and every other pane gets scrolled to the same Y via
+    /// <see cref="ScrollToLineRequested"/>. Pure read — does not mutate
+    /// Panes. Resets <see cref="CurrentChangeIndex"/> to -1 so the
+    /// next Next-click lands on the first change.
+    /// </summary>
+    private void RebuildChangeIndex()
+    {
+        var anchor = Panes.FirstOrDefault();
+        if (anchor is null) { ChangeLineIndices = Array.Empty<int>(); }
+        else
+        {
+            var idx = new List<int>();
+            for (int i = 0; i < anchor.Lines.Count; i++)
+                if (anchor.Lines[i].State == LineState.Different)
+                    idx.Add(i);
+            ChangeLineIndices = idx;
+        }
+        CurrentChangeIndex = -1;
+        OnPropertyChanged(nameof(ChangeNavigationLabel));
+        OnPropertyChanged(nameof(HasChanges));
+    }
 
     public BatchPreviewViewModel(AppServices svc, string objectName, IReadOnlyList<PreviewEndpoint> endpoints)
     {
@@ -130,18 +220,21 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
         // endpoint" errors (we have no endpoints to query in this mode).
         vm._skipFetchOnLoad = true;
 
-        // Pre-populate the panes immediately — no LoadAsync needed.
-        // Each side aligns against the other so AlignedPaneLine.State
-        // ends up populated for the diff highlighter.
-        var leftLines  = Base.It.Core.Diff.LineAligner.Align(leftDefinition,  new[] { rightDefinition });
-        var rightLines = Base.It.Core.Diff.LineAligner.Align(rightDefinition, new[] { leftDefinition  });
+        // Pair-aware aligner produces per-line char-diff segments so
+        // the renderer can highlight only the actual substring change
+        // instead of repainting the whole line on a whitespace edit.
+        // Two-pane case is the common one (sync screen, snapshot diff,
+        // single-target preview); larger fan-outs use the legacy N-way
+        // path below in LoadAsync.
+        var (leftLines, rightLines) = Base.It.Core.Diff.LineAligner.AlignPair(leftDefinition, rightDefinition);
         vm.Panes.Add(new EnvPane(leftLabel,  leftColor,  leftDefinition,  leftLines));
         vm.Panes.Add(new EnvPane(rightLabel, rightColor, rightDefinition, rightLines));
 
-        var diffs = vm.Panes.Sum(p => p.Lines.Count(l => l.State == Base.It.Core.Diff.LineState.Different));
+        var diffs = leftLines.Count(l => l.State == Base.It.Core.Diff.LineState.Different);
         vm.Status = diffs == 0
             ? "Both sides match — no line-level differences."
             : $"{diffs} differing line(s).";
+        vm.RebuildChangeIndex();
         return vm;
     }
 
@@ -218,12 +311,28 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
                 return;
             }
 
-            var allDefs = withContent.Select(x => x.Definition!).ToList();
-            foreach (var (label, color, def, _) in withContent)
+            // Two-pane case → pair-aware aligner so the renderer paints
+            // only the changed substring (whitespace edits no longer
+            // blanket a whole line). Three or more panes fall back to
+            // the legacy N-way Align because pairwise char-diff against
+            // multiple peers would produce conflicting segments.
+            if (withContent.Count == 2)
             {
-                var peers = allDefs.Where(d => !ReferenceEquals(d, def));
-                var lines = LineAligner.Align(def!, peers);
-                Panes.Add(new EnvPane(label, color, def!, lines));
+                var a = withContent[0];
+                var b = withContent[1];
+                var (aLines, bLines) = LineAligner.AlignPair(a.Definition!, b.Definition!);
+                Panes.Add(new EnvPane(a.Label, a.Color, a.Definition!, aLines));
+                Panes.Add(new EnvPane(b.Label, b.Color, b.Definition!, bLines));
+            }
+            else
+            {
+                var allDefs = withContent.Select(x => x.Definition!).ToList();
+                foreach (var (label, color, def, _) in withContent)
+                {
+                    var peers = allDefs.Where(d => !ReferenceEquals(d, def));
+                    var lines = LineAligner.Align(def!, peers);
+                    Panes.Add(new EnvPane(label, color, def!, lines));
+                }
             }
 
             // Surface failures in a neutral block above the panes so the
@@ -241,6 +350,7 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
             Status = diffs == 0
                 ? $"All {Panes.Count} endpoint(s) match — no differences."
                 : $"{Panes.Count} endpoint(s), {diffs} differing line(s).";
+            RebuildChangeIndex();
         }
         catch (Exception ex)
         {

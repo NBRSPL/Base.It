@@ -11,20 +11,53 @@
         Background="{DynamicResource App.WindowBgBrush}">
 
     <Panel>
-    <Grid RowDefinitions="Auto,*,Auto" Margin="14">
+    <Grid RowDefinitions="Auto,Auto,*,Auto" Margin="14">
 
         <!-- Header -->
         <TextBlock Grid.Row="0" Text="{Binding Title}"
                    FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
 
+        <!-- Change-navigation toolbar. Visible only when the diff has at
+             least one change (HasChanges → true). Prev / Next walk
+             through ChangeLineIndices; the counter shows "N of M" so
+             users know where they are in the change set without
+             having to skim the whole document — same pattern as
+             git diff viewers and IDE diff panes. F3 / Shift+F3 are
+             wired in code-behind as keyboard equivalents. -->
+        <Border Grid.Row="1" Margin="0,0,0,8" Padding="8,4"
+                CornerRadius="4"
+                Background="{DynamicResource App.ToolbarBgBrush}"
+                BorderBrush="{DynamicResource App.StrokeBrush}"
+                BorderThickness="1"
+                IsVisible="{Binding HasChanges}">
+            <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto">
+                <TextBlock Grid.Column="0" Text="Changes:" VerticalAlignment="Center"
+                           FontSize="11" Opacity="0.7" Margin="0,0,8,0"/>
+                <Button   Grid.Column="1" Content="◀" Padding="8,2" MinHeight="24"
+                          Command="{Binding PrevChangeCommand}"
+                          ToolTip.Tip="Previous change (Shift+F3)"/>
+                <TextBlock Grid.Column="2" Text="{Binding ChangeNavigationLabel}"
+                           VerticalAlignment="Center"
+                           FontSize="11" FontWeight="SemiBold"
+                           Foreground="{DynamicResource App.AccentBrush}"
+                           Margin="8,0"/>
+                <Button   Grid.Column="3" Content="▶" Padding="8,2" MinHeight="24"
+                          Command="{Binding NextChangeCommand}"
+                          ToolTip.Tip="Next change (F3)"/>
+                <TextBlock Grid.Column="5" Text="Tip: F3 next, Shift+F3 previous, Ctrl+F find"
+                           VerticalAlignment="Center" HorizontalAlignment="Right"
+                           FontSize="10" Opacity="0.5"/>
+            </Grid>
+        </Border>
+
         <!-- Reusable diff-pane host. Status text + per-endpoint failure
              block + side-by-side pane rendering all live in PaneDiffView
              so the inline Sync screen and this standalone Window share
              one renderer. -->
-        <v:PaneDiffView Grid.Row="1" x:Name="PaneHost"
+        <v:PaneDiffView Grid.Row="2" x:Name="PaneHost"
                         DataContext="{Binding}"/>
 
-        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0" Spacing="6">
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,10,0,0" Spacing="6">
             <!-- Per-pane Copy lives on each pane's header (see BuildHeader
                  in PaneDiffView). This footer only owns the Close action. -->
             <Button Content="Close" MinWidth="80" Click="OnClose" Classes="accent"/>

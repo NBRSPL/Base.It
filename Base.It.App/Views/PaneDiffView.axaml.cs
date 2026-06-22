@@ -30,11 +30,41 @@ public partial class PaneDiffView : UserControl
     private BatchPreviewViewModel? _vm;
     private string _findText = "";
 
+    /// <summary>
+    /// Per-pane scrollviewer + measured offset of each line — used by
+    /// <see cref="ScrollToLine"/> so the change-navigation buttons can
+    /// jump every pane to the same line without re-laying-out. Cleared
+    /// + rebuilt on every <see cref="Rebuild"/>.
+    /// </summary>
+    private readonly List<(ScrollViewer Scroll, SelectableTextBlock Text)> _paneScrolls = new();
+
     public PaneDiffView()
     {
         AvaloniaXamlLoader.Load(this);
         DataContextChanged += (_, _) => Bind();
         DetachedFromVisualTree += (_, _) => Unbind();
+    }
+
+    /// <summary>
+    /// Scroll every pane to the given (0-based) line index so a click on
+    /// the preview window's "next change" button puts both source and
+    /// target on the same line. The estimate is based on monospace line
+    /// height — close enough for the kind of "bring it into view" jump
+    /// the user expects from a change-navigation button.
+    /// </summary>
+    public void ScrollToLine(int lineIndex)
+    {
+        if (lineIndex < 0) return;
+        // Approximate line height for Cascadia Mono / Consolas at 12pt
+        // is ~16-17px; using 16 keeps the target line a bit above
+        // centre so the user can see what follows. The 60px headroom
+        // pulls the line off the top edge.
+        const double LineHeight = 16.0;
+        var y = Math.Max(0, lineIndex * LineHeight - 60);
+        foreach (var (scroll, _) in _paneScrolls)
+        {
+            scroll.Offset = new Avalonia.Vector(scroll.Offset.X, y);
+        }
     }
 
     /// <summary>
@@ -95,6 +125,7 @@ public partial class PaneDiffView : UserControl
 
         host.Children.Clear();
         host.ColumnDefinitions.Clear();
+        _paneScrolls.Clear();
 
         var panes = _vm.Panes.ToArray();
         if (panes.Length == 0) return;
@@ -148,6 +179,10 @@ public partial class PaneDiffView : UserControl
             VerticalScrollBarVisibility   = ScrollBarVisibility.Auto,
             Content = text
         };
+        // Cache (scrollviewer, text) for ScrollToLine: change-nav buttons
+        // need to drive every pane to the same line without re-querying
+        // the visual tree on every click.
+        _paneScrolls.Add((scroll, text));
 
         var grid = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
         Grid.SetRow(header, 0);
@@ -232,18 +267,44 @@ public partial class PaneDiffView : UserControl
         };
     }
 
+    /// <summary>
+    /// Paint one pane's lines into the <see cref="SelectableTextBlock"/>.
+    ///
+    /// <para>Two render paths share this method:</para>
+    /// <list type="number">
+    ///   <item>2-pane mode: <see cref="AlignedPaneLine.Segments"/> is
+    ///         populated by <see cref="LineAligner.AlignPair"/>. We paint
+    ///         only the changed substrings highlighted — whitespace or
+    ///         one-char edits no longer blanket the whole line. Removed
+    ///         segments use the red theme pair, added use green; equal
+    ///         segments render plain.</item>
+    ///   <item>N-way mode (3+ panes, no per-pair segment list): fall back
+    ///         to the legacy "whole-line highlight in amber" so multi-
+    ///         target previews still light up differences without us
+    ///         needing to decide which peer to char-diff against.</item>
+    /// </list>
+    ///
+    /// <para>The Find overlay's highlight wins over both — it's the
+    /// user's active search and should be visible regardless of
+    /// underlying diff state.</para>
+    /// </summary>
     private static void PopulateInlines(SelectableTextBlock target, IReadOnlyList<AlignedPaneLine> lines, string findText)
     {
         target.Inlines?.Clear();
         if (target.Inlines is null) target.Inlines = new InlineCollection();
 
-        var diffBg = ResolveBrush("App.DiffBgBrush",
-            new SolidColorBrush(Color.FromArgb(0xFF, 0x7A, 0x5A, 0x00)));
-        var diffFg = ResolveBrush("App.DiffFgBrush",
-            new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xF4, 0xC2)));
-
-        var findBg = new SolidColorBrush(Color.FromArgb(0xFF, 0x22, 0x8B, 0x22));
-        var findFg = Brushes.White;
+        // Themed brushes — resolved once per build so light/dark toggle
+        // re-runs PopulateInlines via Rebuild. Fallbacks match the
+        // ThemeResources.axaml dark values so a missing key doesn't
+        // produce an invisible diff.
+        var diffBg = ResolveBrush("App.DiffBgBrush",     new SolidColorBrush(Color.FromArgb(0xFF, 0x7A, 0x5A, 0x00)));
+        var diffFg = ResolveBrush("App.DiffFgBrush",     new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xF4, 0xC2)));
+        var delBg  = ResolveBrush("App.DiffDelBgBrush",  new SolidColorBrush(Color.FromArgb(0xFF, 0x5C, 0x23, 0x33)));
+        var delFg  = ResolveBrush("App.DiffDelFgBrush",  new SolidColorBrush(Color.FromArgb(0xFF, 0xFF, 0xB3, 0xB3)));
+        var addBg  = ResolveBrush("App.DiffAddBgBrush",  new SolidColorBrush(Color.FromArgb(0xFF, 0x21, 0x39, 0x2B)));
+        var addFg  = ResolveBrush("App.DiffAddFgBrush",  new SolidColorBrush(Color.FromArgb(0xFF, 0xB6, 0xF0, 0xB6)));
+        var findBg = ResolveBrush("App.FindMatchBgBrush",new SolidColorBrush(Color.FromArgb(0xFF, 0x2E, 0x8B, 0x57)));
+        var findFg = ResolveBrush("App.FindMatchFgBrush",Brushes.White);
 
         var hasFind = !string.IsNullOrEmpty(findText);
 
@@ -252,51 +313,77 @@ public partial class PaneDiffView : UserControl
             var line = lines[i];
             var isDiff = line.State == LineState.Different;
 
-            if (hasFind)
+            // 2-pane mode: we have per-segment kinds. Render each
+            // segment with the right brush — and overlay Find matches
+            // on top of whatever the segment kind was.
+            if (line.Segments is { Count: > 0 } segments)
             {
-                var text = line.Text;
-                int from = 0;
-                while (from < text.Length)
+                foreach (var seg in segments)
                 {
-                    var hit = text.IndexOf(findText, from, StringComparison.OrdinalIgnoreCase);
-                    if (hit < 0)
+                    var (bg, fg) = seg.Kind switch
                     {
-                        AddSegment(target.Inlines!, text.Substring(from), isDiff, diffBg, diffFg, false, findBg, findFg);
-                        break;
-                    }
-                    if (hit > from)
-                        AddSegment(target.Inlines!, text.Substring(from, hit - from), isDiff, diffBg, diffFg, false, findBg, findFg);
-                    AddSegment(target.Inlines!, text.Substring(hit, findText.Length), isDiff, diffBg, diffFg, true, findBg, findFg);
-                    from = hit + findText.Length;
+                        CharDiff.SegmentKind.Removed => (delBg,  delFg),
+                        CharDiff.SegmentKind.Added   => (addBg,  addFg),
+                        _                            => ((IBrush?)null, (IBrush?)null),
+                    };
+                    EmitWithFind(target.Inlines!, seg.Text, bg, fg, findText, hasFind, findBg, findFg);
                 }
             }
             else
             {
-                AddSegment(target.Inlines!, line.Text, isDiff, diffBg, diffFg, false, findBg, findFg);
+                // N-way fallback: highlight the whole line in amber when
+                // it's marked Different; otherwise plain.
+                var bg = isDiff ? diffBg : null;
+                var fg = isDiff ? diffFg : null;
+                EmitWithFind(target.Inlines!, line.Text, bg, fg, findText, hasFind, findBg, findFg);
             }
 
             if (i < lines.Count - 1) target.Inlines.Add(new LineBreak());
         }
     }
 
-    private static void AddSegment(InlineCollection target, string segment,
-        bool isDiff, IBrush diffBg, IBrush diffFg,
-        bool isFindMatch, IBrush findBg, IBrush findFg)
+    /// <summary>
+    /// Emit a segment of text into the inlines collection, splitting on
+    /// any find-text hits so the Find overlay's highlight overrides the
+    /// diff colour on matched substrings. <paramref name="bg"/> /
+    /// <paramref name="fg"/> are the diff colours for the surrounding
+    /// segment (null = plain text).
+    /// </summary>
+    private static void EmitWithFind(
+        InlineCollection target, string text,
+        IBrush? bg, IBrush? fg,
+        string findText, bool hasFind,
+        IBrush findBg, IBrush findFg)
+    {
+        if (text.Length == 0) return;
+        if (!hasFind)
+        {
+            AddRun(target, text, bg, fg, isStrong: bg is not null);
+            return;
+        }
+        int from = 0;
+        while (from < text.Length)
+        {
+            var hit = text.IndexOf(findText, from, StringComparison.OrdinalIgnoreCase);
+            if (hit < 0)
+            {
+                AddRun(target, text.Substring(from), bg, fg, isStrong: bg is not null);
+                return;
+            }
+            if (hit > from)
+                AddRun(target, text.Substring(from, hit - from), bg, fg, isStrong: bg is not null);
+            AddRun(target, text.Substring(hit, findText.Length), findBg, findFg, isStrong: true);
+            from = hit + findText.Length;
+        }
+    }
+
+    private static void AddRun(InlineCollection target, string segment, IBrush? bg, IBrush? fg, bool isStrong)
     {
         if (segment.Length == 0) return;
         var run = new Run(segment);
-        if (isFindMatch)
-        {
-            run.Background = findBg;
-            run.Foreground = findFg;
-            run.FontWeight = FontWeight.SemiBold;
-        }
-        else if (isDiff)
-        {
-            run.Background = diffBg;
-            run.Foreground = diffFg;
-            run.FontWeight = FontWeight.SemiBold;
-        }
+        if (bg is not null) run.Background = bg;
+        if (fg is not null) run.Foreground = fg;
+        if (isStrong)       run.FontWeight = FontWeight.SemiBold;
         target.Add(run);
     }
 
