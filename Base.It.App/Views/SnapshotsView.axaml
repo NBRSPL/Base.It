@@ -100,46 +100,54 @@
                      "What changed since X?" — direct read of
                      sys.objects.modify_date on the picked endpoint, NOT
                      a stored snapshot. Collapsed by default so the
-                     header is a single thin row; expanding shows a
-                     CalendarDatePicker + Find / Send-to-Batch row, then
-                     the result grid which uses the SAME header pattern
-                     as the snapshot Entries grid (funnel filters on
-                     Schema + Object Type, inline sort arrows on Name +
-                     Modified). MaxHeight=260 so it never dominates the
-                     page. -->
-                <Expander Header="Recent changes — find objects modified since a date (live query, not a snapshot)"
-                          IsExpanded="False" Margin="0,0,0,8">
+                     header is a single thin row. Controls + filter +
+                     results all use the same compact spacing the
+                     snapshot Entries grid uses, so the two screens read
+                     consistently. MaxHeight on the result Border keeps
+                     the panel from dominating the page even with large
+                     change sets. -->
+                <Expander Header="Recent changes (live query)"
+                          IsExpanded="False" Margin="0,0,0,6">
                     <DockPanel>
-                        <!-- Controls row -->
+                        <!-- Controls row — date · find · live filter · send.
+                             Both buttons are compact (MinHeight=26) so the
+                             row stays one line on narrower windows. The
+                             filter TextBox lives here (not below the column
+                             header) so the entire control surface is one
+                             row, not two — matches "compact and slick." -->
                         <Grid DockPanel.Dock="Top"
-                              ColumnDefinitions="Auto,Auto,Auto,*,Auto"
+                              ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto"
                               Margin="0,0,0,6">
                             <TextBlock Grid.Column="0" Text="Since"
                                        VerticalAlignment="Center"
                                        FontSize="11" Opacity="0.7"
-                                       Margin="0,0,8,0"/>
-                            <!-- CalendarDatePicker shows a proper month-grid
-                                 popup (Avalonia DatePicker is the wheel-style
-                                 one the user disliked). Width-constrained so
-                                 it doesn't bloat the row. -->
+                                       Margin="0,0,6,0"/>
                             <CalendarDatePicker Grid.Column="1"
                                                 SelectedDate="{Binding RecentChangesSince, Converter={x:Static vm:DateTimeOffsetToDateTimeConverter.Instance}, Mode=TwoWay}"
-                                                Width="140" MinHeight="30"
+                                                Width="128" MinHeight="26"
                                                 VerticalAlignment="Center"
-                                                Watermark="Pick a date"/>
+                                                Watermark="Date"/>
                             <Button Grid.Column="2"
-                                    Content="Find changes" Margin="8,0,0,0" MinHeight="30"
+                                    Content="Find" Margin="6,0,0,0" MinHeight="26"
+                                    Padding="10,0"
                                     Command="{Binding RefreshRecentChangesCommand}"
                                     IsEnabled="{Binding !IsRecentChangesBusy}"
                                     ToolTip.Tip="Query sys.objects for objects modified on or after the picked date. Live read; no snapshot saved."/>
-                            <TextBlock Grid.Column="3"
+                            <TextBox  Grid.Column="3" x:Name="RecentChangesFilterBoxTop"
+                                      Width="200" MinHeight="26" Margin="10,0,0,0"
+                                      VerticalAlignment="Center"
+                                      Text="{Binding RecentChangesNameFilter, Mode=TwoWay}"
+                                      Watermark="Filter by name or type…"
+                                      IsVisible="{Binding RecentChanges.Count}"/>
+                            <TextBlock Grid.Column="4"
                                        Text="{Binding RecentChangesStatus}"
                                        VerticalAlignment="Center"
-                                       FontSize="11" Opacity="0.6"
-                                       Margin="12,0,12,0"
+                                       FontSize="11" Opacity="0.55"
+                                       Margin="10,0,8,0"
                                        TextTrimming="CharacterEllipsis"/>
-                            <Button Grid.Column="4" Classes="accent"
-                                    Content="Send to Batch →" MinHeight="30"
+                            <Button Grid.Column="5" Classes="accent"
+                                    Content="Send to Batch →" MinHeight="26"
+                                    Padding="10,0"
                                     Command="{Binding SendRecentChangesToBatchCommand}"
                                     IsEnabled="{Binding HasRecentChangesSelection}"
                                     ToolTip.Tip="Open the Batch screen pre-filled with the ticked objects."/>
@@ -147,34 +155,17 @@
 
                         <!-- Result grid. Hidden when nothing's been
                              found yet so the Expander body stays
-                             compact until Find has produced rows. -->
+                             compact until Find has produced rows.
+                             Filter input lives in the controls row
+                             above (one row of UI, not two). Ctrl+C on
+                             selected rows copies object names — same
+                             shortcut the snapshot Entries grid uses. -->
                         <Border BorderThickness="1"
                                 BorderBrush="{DynamicResource App.StrokeBrush}"
                                 CornerRadius="4"
-                                MaxHeight="290"
+                                MaxHeight="260"
                                 IsVisible="{Binding RecentChanges.Count}">
                             <DockPanel>
-                                <!-- Mini search strip — same shape as the
-                                     snapshot Entries filter so the two grids
-                                     feel identical. Right-aligned + 240 wide
-                                     so it doesn't compete with the column
-                                     header below. Live-bound: filters as the
-                                     user types, no Apply button needed. -->
-                                <Border DockPanel.Dock="Top"
-                                        Background="{DynamicResource App.WindowBgBrush}"
-                                        BorderBrush="{DynamicResource App.StrokeBrush}"
-                                        BorderThickness="0,0,0,1"
-                                        Padding="8,5">
-                                    <Grid ColumnDefinitions="*,Auto">
-                                        <TextBlock Grid.Column="0" VerticalAlignment="Center"
-                                                   FontSize="11" Opacity="0.55"
-                                                   Text="Search the result. Tip: tick rows and press Ctrl+C to copy their object names."/>
-                                        <TextBox  Grid.Column="1" x:Name="RecentChangesFilterBox"
-                                                  Width="240" MinHeight="26"
-                                                  Text="{Binding RecentChangesNameFilter, Mode=TwoWay}"
-                                                  Watermark="Filter by name or object type…"/>
-                                    </Grid>
-                                </Border>
                                 <!-- Custom column header — same shape as the
                                      snapshot Entries grid (filter flyouts on
                                      Schema + Object Type, sort arrows on

@@ -1520,16 +1520,30 @@ public sealed partial class BatchViewModel : ObservableObject
                             // pair zips would be duplicative noise.
                             // captureSourceBackup: false — we already wrote
                             // the source-side backup once above.
+                            // approvedDestructiveAlters: null — Batch runs
+                            // unattended. SyncService will apply the safe
+                            // ALTER subset and skip every destructive step;
+                            // we surface the skipped count below so the
+                            // user knows which rows still need a single-
+                            // execute pass on the Sync screen.
                             var r = await _svc.Sync.SyncAsync(
                                 srcConn!, tgtConn!, id, SourceEnv!, t.Environment,
                                 ct: default, zipPair: false,
                                 captureSourceBackup: false,
-                                runStamp: batchRunStamp);
+                                runStamp: batchRunStamp,
+                                approvedDestructiveAlters: null);
                             if (r.TargetBackupPath is not null) batchBackupPaths.Add(r.TargetBackupPath);
                             switch (r.Status)
                             {
                                 case SyncStatus.Success:
-                                    perTargetMsgs.Add($"[{t.Environment}·{t.Database}] ok");
+                                    // Surface ALTER-skipped-destructive counts in
+                                    // the row's message so the user can spot
+                                    // tables that need attention without
+                                    // opening logs. Plain "ok" otherwise.
+                                    var okMsg = r.SkippedDestructiveCount > 0
+                                        ? $"[{t.Environment}·{t.Database}] ok ({r.SkippedDestructiveCount} destructive change(s) skipped — review on Sync screen)"
+                                        : $"[{t.Environment}·{t.Database}] ok";
+                                    perTargetMsgs.Add(okMsg);
                                     itemOk++;
                                     break;
                                 case SyncStatus.NotFound:

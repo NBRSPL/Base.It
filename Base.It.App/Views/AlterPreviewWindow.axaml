@@ -1,0 +1,106 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Base.It.App.Views.AlterPreviewWindow"
+        Title="Review table changes"
+        Width="820" Height="640"
+        MinWidth="600" MinHeight="420"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource App.WindowBgBrush}">
+
+    <!-- Layout intent: top header → safe-changes panel (read-only list) →
+         destructive panel (per-step checkbox + reason) → bottom split between
+         the regenerated SQL preview (left) and the Apply / Cancel buttons
+         (right, footer). The destructive panel collapses when there are
+         zero destructive steps so the safe-only review is just a list. -->
+    <DockPanel LastChildFill="True">
+
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource App.ElevatedBgBrush}"
+                BorderBrush="{DynamicResource App.StrokeBrush}"
+                BorderThickness="0,0,0,1"
+                Padding="14,10">
+            <StackPanel Spacing="2">
+                <TextBlock x:Name="TitleBlock"
+                           Text="Review table changes"
+                           FontSize="16" FontWeight="SemiBold"/>
+                <TextBlock x:Name="SubtitleBlock"
+                           FontSize="11" Opacity="0.65"
+                           TextWrapping="Wrap"/>
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Bottom"
+                Background="{DynamicResource App.ToolbarBgBrush}"
+                BorderBrush="{DynamicResource App.StrokeBrush}"
+                BorderThickness="0,1,0,0"
+                Padding="14,8">
+            <Grid ColumnDefinitions="*,Auto,Auto">
+                <TextBlock Grid.Column="0" x:Name="StatusBlock"
+                           VerticalAlignment="Center"
+                           FontSize="11" Opacity="0.7"
+                           TextWrapping="Wrap"
+                           TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Column="1" Content="Cancel" Margin="0,0,8,0"
+                        MinWidth="90" Click="OnCancel"/>
+                <Button Grid.Column="2" x:Name="ApplyButton"
+                        Content="Apply" Classes="accent" MinWidth="120"
+                        Click="OnApply"
+                        ToolTip.Tip="Run the safe changes (plus any ticked destructive ones) on the target."/>
+            </Grid>
+        </Border>
+
+        <Grid Margin="14,10,14,8" RowDefinitions="Auto,*,Auto,Auto,Auto,*">
+
+            <!-- Safe section header + list -->
+            <TextBlock Grid.Row="0"
+                       Text="Safe changes — will be applied"
+                       FontSize="12" FontWeight="SemiBold"
+                       Foreground="{DynamicResource App.AccentBrush}"
+                       Margin="0,0,0,4"/>
+            <Border Grid.Row="1"
+                    BorderBrush="{DynamicResource App.StrokeBrush}"
+                    BorderThickness="1" CornerRadius="4"
+                    MinHeight="80">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="SafeStack" Margin="8,6" Spacing="2"/>
+                </ScrollViewer>
+            </Border>
+
+            <!-- Destructive section header + list. Visibility flips off
+                 when the plan has zero destructive steps so safe-only
+                 reviews don't show empty chrome. -->
+            <TextBlock Grid.Row="2" x:Name="DestructiveHeader"
+                       Text="Destructive changes — tick to apply (default: skip)"
+                       FontSize="12" FontWeight="SemiBold"
+                       Foreground="#D53935"
+                       Margin="0,12,0,4"/>
+            <Border Grid.Row="3" x:Name="DestructiveBorder"
+                    BorderBrush="#D53935"
+                    BorderThickness="1" CornerRadius="4"
+                    MinHeight="80" MaxHeight="200">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel x:Name="DestructiveStack" Margin="8,6" Spacing="4"/>
+                </ScrollViewer>
+            </Border>
+
+            <!-- SQL preview header + viewer. Regenerated each time the
+                 user ticks/unticks a destructive box so they see the
+                 exact script that will run. -->
+            <TextBlock Grid.Row="4"
+                       Text="Generated T-SQL (rebuilds as you tick boxes)"
+                       FontSize="12" FontWeight="SemiBold"
+                       Margin="0,12,0,4"/>
+            <Border Grid.Row="5"
+                    BorderBrush="{DynamicResource App.StrokeBrush}"
+                    BorderThickness="1" CornerRadius="4">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto">
+                    <SelectableTextBlock x:Name="SqlBlock"
+                                         FontFamily="Consolas, Cascadia Mono"
+                                         FontSize="11"
+                                         Padding="10,6"/>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </DockPanel>
+</Window>

@@ -1,4 +1,5 @@
 using Base.It.Core.Models;
+using Base.It.Core.Sql;
 
 namespace Base.It.Core.Abstractions;
 
@@ -53,6 +54,17 @@ public interface IObjectScripter
     /// </summary>
     Task<IReadOnlyList<SqlObjectRef>> ListAllAsync(
         string connectionString,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Fetches the full constraint-aware metadata for one user table —
+    /// header, columns, PK/UQ, CHECK, FK, indexes — for diff / ALTER
+    /// planning. Returns <c>null</c> when the identifier doesn't resolve
+    /// to a table on this connection. Non-table identifiers return null.
+    /// </summary>
+    Task<TableMetadata?> FetchTableMetadataAsync(
+        string connectionString,
+        ObjectIdentifier id,
         CancellationToken ct = default);
 }
 

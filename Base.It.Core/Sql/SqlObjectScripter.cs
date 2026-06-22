@@ -419,26 +419,11 @@ WHERE tr.name = @name
     /// shared with the bulk snapshot fetcher so the on-disk shape is
     /// identical regardless of which path produced it.
     /// </summary>
-    private static async Task<string> ScriptTableForDacpacAsync(
+    private async Task<string> ScriptTableForDacpacAsync(
         string connectionString, ObjectIdentifier id, CancellationToken ct)
     {
-        await using var conn = new SqlConnection(connectionString);
-        await conn.OpenAsync(ct);
-
-        // Header (real casing + filegroup) and DB collation are read up
-        // front so the body rendering can use them.
-        var header      = await LoadTableHeaderAsync(conn, id, ct);
-        if (header is null) return string.Empty;
-        var dbCollation = await LoadDatabaseCollationAsync(conn, ct);
-
-        // All remaining catalog queries run sequentially on one connection
-        // so nothing interleaves mid-script. They're read-only + non-blocking.
-        var columns   = await LoadColumnsAsync(conn, id, ct);
-        if (columns.Count == 0) return string.Empty;
-        var keyCons   = await LoadKeyConstraintsAsync(conn, id, ct);
-        var checkCons = await LoadCheckConstraintsAsync(conn, id, ct);
-        var fkeys     = await LoadForeignKeysAsync(conn, id, ct);
-        var indexes   = await LoadIndexesAsync(conn, id, ct);
+        var meta = await FetchTableMetadataAsync(connectionString, id, ct);
+        if (meta is null) return string.Empty;
 
         // Triggers stay as first-class objects: the bulk snapshot fetcher
         // captures them as type='TR', and the merged Sync screen / preview
@@ -450,16 +435,61 @@ WHERE tr.name = @name
         var triggers = Array.Empty<(string, string, string)>();
 
         return TableScriptRenderer.Render(
-            schema:           header.Value.Schema,
-            name:             header.Value.Name,
-            filegroup:        header.Value.Filegroup,
-            columns:          columns,
-            keyConstraints:   keyCons,
-            checkConstraints: checkCons,
-            foreignKeys:      fkeys,
-            indexes:          indexes,
+            schema:           meta.Schema,
+            name:             meta.Name,
+            filegroup:        meta.Filegroup,
+            columns:          meta.Columns,
+            keyConstraints:   meta.KeyConstraints,
+            checkConstraints: meta.CheckConstraints,
+            foreignKeys:      meta.ForeignKeys,
+            indexes:          meta.Indexes,
             triggers:         triggers,
-            dbCollation:      dbCollation);
+            dbCollation:      meta.DatabaseCollation);
+    }
+
+    /// <summary>
+    /// Fetch the full constraint-aware metadata for one user table —
+    /// header, columns, PK/UQ, CHECK, FK, indexes — from the live
+    /// connection. Used by the ALTER planner (which needs to compare
+    /// source vs target shapes column-by-column) and internally by
+    /// <see cref="ScriptTableForDacpacAsync"/>, so the snapshot capture
+    /// path and the ALTER diff path see identical data.
+    ///
+    /// Returns <c>null</c> when the table doesn't exist or has no
+    /// columns (the latter shouldn't happen in practice but we guard
+    /// anyway — a header without columns means a half-created table).
+    /// </summary>
+    public async Task<TableMetadata?> FetchTableMetadataAsync(
+        string connectionString, ObjectIdentifier id, CancellationToken ct = default)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        // Header (real casing + filegroup) and DB collation are read up
+        // front so the body rendering can use them.
+        var header      = await LoadTableHeaderAsync(conn, id, ct);
+        if (header is null) return null;
+        var dbCollation = await LoadDatabaseCollationAsync(conn, ct);
+
+        // All remaining catalog queries run sequentially on one connection
+        // so nothing interleaves mid-script. They're read-only + non-blocking.
+        var columns   = await LoadColumnsAsync(conn, id, ct);
+        if (columns.Count == 0) return null;
+        var keyCons   = await LoadKeyConstraintsAsync(conn, id, ct);
+        var checkCons = await LoadCheckConstraintsAsync(conn, id, ct);
+        var fkeys     = await LoadForeignKeysAsync(conn, id, ct);
+        var indexes   = await LoadIndexesAsync(conn, id, ct);
+
+        return new TableMetadata(
+            Schema:            header.Value.Schema,
+            Name:              header.Value.Name,
+            Filegroup:         header.Value.Filegroup,
+            Columns:           columns,
+            KeyConstraints:    keyCons,
+            CheckConstraints:  checkCons,
+            ForeignKeys:       fkeys,
+            Indexes:           indexes,
+            DatabaseCollation: dbCollation);
     }
 
     // ---- Table header + DB collation --------------------------------------

@@ -15,11 +15,14 @@ namespace Base.It.Core.Sql;
 ///         set.</item>
 /// </list>
 /// </summary>
-internal static class TableScriptRenderer
+public static class TableScriptRenderer
 {
     // ─── Public data shapes (filled by callers from catalog reads) ─────────
+    // Promoted to public so the ALTER planner (in Base.It.Core.Sync.TableAlter)
+    // can consume the same records the snapshot capture path produces — one
+    // vocabulary for "what a table is" across snapshot, render, and diff.
 
-    internal sealed record ColumnInfo(
+    public sealed record ColumnInfo(
         string  Name,
         string  TypeName,
         int     MaxLength,
@@ -37,7 +40,7 @@ internal static class TableScriptRenderer
         string? CollationName,
         bool    IsRowGuidCol);
 
-    internal sealed record KeyConstraintGroup(
+    public sealed record KeyConstraintGroup(
         string Name,
         string Type,           // "PK" or "UQ"
         string IndexType,      // CLUSTERED / NONCLUSTERED
@@ -46,16 +49,16 @@ internal static class TableScriptRenderer
         string DataSpaceName,
         List<(string Column, bool Desc)> Columns);
 
-    internal sealed record CheckConstraintInfo(
+    public sealed record CheckConstraintInfo(
         string Name, string Definition, bool IsNotTrusted, bool IsNotForReplication);
 
-    internal sealed record ForeignKeyGroup(
+    public sealed record ForeignKeyGroup(
         string Name, bool IsNotTrusted, bool IsNotForReplication,
         string RefSchema, string RefTable,
         string OnDelete, string OnUpdate,
         List<(string Column, string RefColumn)> Columns);
 
-    internal sealed record IndexGroup(
+    public sealed record IndexGroup(
         string Name, string TypeDesc, bool IsUnique, string? Filter,
         List<(string Column, bool Desc)> KeyCols,
         List<string> IncludeCols);
@@ -72,7 +75,7 @@ internal static class TableScriptRenderer
     /// Pass <paramref name="triggers"/> empty when triggers are captured
     /// as their own first-class objects (the snapshot model does this).
     /// </summary>
-    internal static string Render(
+    public static string Render(
         string schema,
         string name,
         string filegroup,
@@ -132,7 +135,7 @@ internal static class TableScriptRenderer
 
     // ─── Per-element rendering helpers ─────────────────────────────────────
 
-    internal static string RenderColumn(
+    public static string RenderColumn(
         ColumnInfo c, string nameField, string typeField, int maxName, int maxType, string? dbCollation)
     {
         // Computed columns have no type / nullability / default — just the expression.
@@ -175,7 +178,7 @@ internal static class TableScriptRenderer
         return sb.ToString();
     }
 
-    internal static string RenderTypeSpec(ColumnInfo c)
+    public static string RenderTypeSpec(ColumnInfo c)
     {
         var upper = c.TypeName.ToUpperInvariant();
         var lower = c.TypeName.ToLowerInvariant();
@@ -193,10 +196,10 @@ internal static class TableScriptRenderer
         };
     }
 
-    internal static bool IsStringLikeType(string t) => t.ToLowerInvariant() is
+    public static bool IsStringLikeType(string t) => t.ToLowerInvariant() is
         "char" or "varchar" or "nchar" or "nvarchar" or "text" or "ntext";
 
-    internal static string RenderKeyConstraint(KeyConstraintGroup k)
+    public static string RenderKeyConstraint(KeyConstraintGroup k)
     {
         var kind = k.Type.Equals("PK", StringComparison.OrdinalIgnoreCase)
             ? "PRIMARY KEY"
@@ -213,13 +216,13 @@ internal static class TableScriptRenderer
         return $"    CONSTRAINT [{k.Name}] {kind} {k.IndexType} ({cols}){withClause}{onClause}";
     }
 
-    internal static string RenderCheckConstraint(CheckConstraintInfo c)
+    public static string RenderCheckConstraint(CheckConstraintInfo c)
     {
         var nfr = c.IsNotForReplication ? " NOT FOR REPLICATION" : "";
         return $"    CONSTRAINT [{c.Name}] CHECK{nfr} {c.Definition}";
     }
 
-    internal static string RenderForeignKey(ForeignKeyGroup fk, string parentSchema, string parentTable)
+    public static string RenderForeignKey(ForeignKeyGroup fk, string parentSchema, string parentTable)
     {
         var cols    = string.Join(", ", fk.Columns.Select(c => $"[{c.Column}]"));
         var refCols = string.Join(", ", fk.Columns.Select(c => $"[{c.RefColumn}]"));
@@ -234,7 +237,7 @@ internal static class TableScriptRenderer
                $"{nfr}{onDel}{onUpd};\n";
     }
 
-    internal static string RenderIndex(IndexGroup ix, string parentSchema, string parentTable)
+    public static string RenderIndex(IndexGroup ix, string parentSchema, string parentTable)
     {
         var unique  = ix.IsUnique ? "UNIQUE " : "";
         var keyCols = string.Join(", ", ix.KeyCols.Select(c => $"[{c.Column}] {(c.Desc ? "DESC" : "ASC")}"));

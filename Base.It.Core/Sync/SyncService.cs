@@ -4,6 +4,7 @@ using Base.It.Core.Logging;
 using Base.It.Core.Models;
 using Base.It.Core.Parsing;
 using Base.It.Core.Sql;
+using Base.It.Core.Sync.TableAlter;
 using Microsoft.Data.SqlClient;
 
 namespace Base.It.Core.Sync;
@@ -51,7 +52,8 @@ public sealed class SyncService
         CancellationToken ct = default,
         bool zipPair = true,
         bool captureSourceBackup = true,
-        string? runStamp = null)
+        string? runStamp = null,
+        IReadOnlyList<AlterStep>? approvedDestructiveAlters = null)
     {
         runStamp ??= FileBackupStore.NewRunStamp();
         try
@@ -71,6 +73,28 @@ public sealed class SyncService
                     targetBackup = _backups.WriteObject(runStamp, BackupRole.Target, targetEnv, existing.Type, id, existing.Definition);
             }
 
+            // ─── Table + target-exists: ALTER path ────────────────────────
+            //
+            // Branches off the regular sync pipeline before script rewriting.
+            // We're not sending CREATE TABLE; we're diffing live source vs
+            // live target and emitting the minimal ALTER batch — wrapped in
+            // a transaction inside AlterScriptBuilder so any single failure
+            // rolls back every change. Triggers on this table are NEVER
+            // touched: they're separate snapshot objects, and we never DROP
+            // TABLE (which is the only operation that would cascade-drop
+            // them). Existing rows survive — we refuse type narrowing,
+            // refuse DROP COLUMN, refuse NULL→NOT NULL without a default,
+            // refuse identity changes, etc. Anything that could lose data
+            // sits in DestructiveSteps and only runs if the caller passed
+            // matching entries in approvedDestructiveAlters.
+            if (source.Type == SqlObjectType.Table && targetExists)
+            {
+                return await ApplyTableAlterAsync(
+                    sourceConn, targetConn, id, sourceEnv, targetEnv,
+                    source, targetBackup, runStamp, zipPair, captureSourceBackup,
+                    approvedDestructiveAlters, ct);
+            }
+
             var script = targetExists
                 ? CreateToAlterRewriter.Rewrite(source.Definition, source.Type)
                 : source.Definition;
@@ -84,13 +108,13 @@ public sealed class SyncService
                     TargetBackupPath: targetBackup);
             }
 
-            // Tables now arrive as multi-batch scripts (CREATE TABLE; GO;
-            // CREATE INDEX; GO; ALTER TABLE ADD CONSTRAINT; GO; …) so we
-            // route them through SqlScriptRunner which honours GO. Modules
-            // (SP / FN / V / TR) are still single-batch and use the
-            // simpler ExecuteNonQueryAsync path. Any failure inside the
-            // table runner stops further batches and surfaces the first
-            // batch's error so the user sees the actual root cause.
+            // First-time CREATE TABLE arrives as a multi-batch script
+            // (CREATE TABLE; GO; CREATE INDEX; GO; ALTER TABLE ADD FK; GO; …)
+            // so we route it through SqlScriptRunner which honours GO.
+            // Modules (SP / FN / V / TR) are still single-batch and use
+            // the simpler ExecuteNonQueryAsync path. Any failure inside
+            // the table runner stops further batches and surfaces the
+            // first batch's error so the user sees the actual root cause.
             if (source.Type == SqlObjectType.Table)
             {
                 var runner = new SqlScriptRunner(commandTimeoutSeconds: 120);
@@ -200,6 +224,21 @@ public sealed class SyncService
                         existing.Type, source.Id, existing.Definition);
             }
 
+            // Snapshot-source ALTER isn't supported in v1: we have only
+            // the rendered CREATE script from the snapshot, not the
+            // structured metadata, so we can't reliably diff against the
+            // live target. Refuse with a clear message that points the
+            // user at the live-source path instead. Existing target data
+            // is unaffected — we return before touching anything.
+            if (source.Type == SqlObjectType.Table && targetExists)
+            {
+                _logger.Log($"SnapshotSync {source.Id} ({sourceLabel})->{targetEnv} refused: ALTER from snapshot source not supported.");
+                return new SyncResult(SyncStatus.Failed,
+                    "Syncing a table from a snapshot to an existing target isn't supported — ALTER planning needs live source metadata. " +
+                    "On the Sync screen pick the live source endpoint and run again, or drop the target table first if you intend to recreate it.",
+                    TargetBackupPath: targetBackup);
+            }
+
             var script = targetExists
                 ? CreateToAlterRewriter.Rewrite(source.Definition, source.Type)
                 : source.Definition;
@@ -266,5 +305,168 @@ public sealed class SyncService
             _logger.Log($"SnapshotSync {source.Id} ({sourceLabel})->{targetEnv} error: {ex.Message}");
             return new SyncResult(SyncStatus.Failed, $"Error: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Build the ALTER plan for one table without executing anything.
+    /// Single-execute callers invoke this first so the user can review
+    /// the proposed changes (and approve / reject destructive ones)
+    /// before <see cref="SyncAsync"/> applies the result.
+    ///
+    /// Returns <c>null</c> when either side's table metadata couldn't be
+    /// read — e.g. the identifier points at a non-table object, or the
+    /// table doesn't exist on one side. Callers treat null as "fall
+    /// back to the regular CREATE path."
+    /// </summary>
+    public async Task<AlterPlan?> PlanTableAlterAsync(
+        string sourceConn, string targetConn,
+        ObjectIdentifier id,
+        CancellationToken ct = default)
+    {
+        var sourceMeta = await _scripter.FetchTableMetadataAsync(sourceConn, id, ct);
+        if (sourceMeta is null) return null;
+        var targetMeta = await _scripter.FetchTableMetadataAsync(targetConn, id, ct);
+        if (targetMeta is null) return null;
+        return TableAlterPlanner.Plan(sourceMeta, targetMeta);
+    }
+
+    /// <summary>
+    /// Inner helper for the ALTER path of <see cref="SyncAsync"/>. Builds
+    /// the plan, decides what to apply (safe ∪ approved-destructive),
+    /// runs the resulting transaction-wrapped batch on the target, and
+    /// writes the source-side backup at the end so a successful run
+    /// leaves the canonical "before / after" pair on disk.
+    ///
+    /// Backs out cleanly on any failure: the SQL batch is one
+    /// transaction so a SqlException leaves the table untouched, and we
+    /// surface the original error to the caller verbatim (no swallowing).
+    /// </summary>
+    private async Task<SyncResult> ApplyTableAlterAsync(
+        string sourceConn, string targetConn,
+        ObjectIdentifier id,
+        string sourceEnv, string targetEnv,
+        SqlObject source,
+        string? targetBackup,
+        string runStamp,
+        bool zipPair, bool captureSourceBackup,
+        IReadOnlyList<AlterStep>? approvedDestructiveAlters,
+        CancellationToken ct)
+    {
+        // Re-build the plan inside the sync call so we're acting on the
+        // CURRENT state of both ends, not whatever the preview saw N
+        // seconds ago. The approved-destructive list from the caller is
+        // matched by structural equality (records compare by field) —
+        // if the table changed since the preview, unmatched approvals
+        // simply don't apply and the user sees only the still-current
+        // safe subset run.
+        var sourceMeta = await _scripter.FetchTableMetadataAsync(sourceConn, id, ct);
+        var targetMeta = await _scripter.FetchTableMetadataAsync(targetConn, id, ct);
+        if (sourceMeta is null || targetMeta is null)
+        {
+            return new SyncResult(SyncStatus.Failed,
+                "Could not read table metadata from source or target — refusing to ALTER.",
+                TargetBackupPath: targetBackup);
+        }
+
+        var plan = TableAlterPlanner.Plan(sourceMeta, targetMeta);
+        if (plan.IsEmpty)
+        {
+            return new SyncResult(SyncStatus.Success,
+                $"{id} is already in sync — no ALTER needed.",
+                TargetBackupPath: targetBackup,
+                AlterPlan: plan);
+        }
+
+        // Resolve which destructive steps were approved. Use record
+        // equality (AlterStep is a record), so identical Kind+Sql+Summary
+        // → match. A step that was approved against a stale plan and is
+        // no longer in DestructiveSteps quietly drops out — the caller
+        // gets it back via SkippedDestructiveCount = full destructive
+        // count minus matched.
+        var approvedSet = new HashSet<AlterStep>(approvedDestructiveAlters ?? Array.Empty<AlterStep>());
+        var destructiveToApply = plan.DestructiveSteps.Where(approvedSet.Contains).ToList();
+        var skippedDestructive  = plan.DestructiveSteps.Count - destructiveToApply.Count;
+
+        var stepsToApply = plan.SafeSteps.Concat(destructiveToApply).ToList();
+        if (stepsToApply.Count == 0)
+        {
+            // Plan has only unapproved destructive — nothing safe to run.
+            _logger.Log($"Sync {id} {sourceEnv}->{targetEnv}: {plan.DestructiveSteps.Count} destructive step(s) detected, none approved — nothing applied.");
+            return new SyncResult(SyncStatus.Success,
+                $"{plan.DestructiveSteps.Count} destructive change(s) detected for {id}. Nothing applied — review on the Sync screen.",
+                TargetBackupPath: targetBackup,
+                AlterPlan: plan,
+                SkippedDestructiveCount: skippedDestructive);
+        }
+
+        var script = AlterScriptBuilder.Build(id, stepsToApply);
+        var validation = TSqlValidator.Validate(script);
+        if (!validation.IsValid)
+        {
+            var err = string.Join("; ", validation.Errors);
+            _logger.Log($"Sync {id} {sourceEnv}->{targetEnv} ALTER REJECTED by parser: {err}");
+            return new SyncResult(SyncStatus.Failed,
+                $"ALTER script failed T-SQL validation: {err}",
+                TargetBackupPath: targetBackup,
+                AlterPlan: plan);
+        }
+
+        try
+        {
+            // Single batch on a single connection — atomic via the
+            // BEGIN TRY / BEGIN TRAN / COMMIT / ROLLBACK that
+            // AlterScriptBuilder wraps the steps in. CommandTimeout is
+            // bumped to 300s because index rebuilds on large tables can
+            // exceed the 120s default we use for module objects.
+            await using var conn = new SqlConnection(targetConn);
+            await conn.OpenAsync(ct);
+            await using var cmd = new SqlCommand(script, conn) { CommandTimeout = 300 };
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (SqlException ex)
+        {
+            _logger.Log($"Sync {id} {sourceEnv}->{targetEnv} ALTER SQL error: {ex.Message}");
+            return new SyncResult(SyncStatus.Failed,
+                $"ALTER rolled back — SQL error: {ex.Message}",
+                TargetBackupPath: targetBackup,
+                AlterPlan: plan);
+        }
+
+        // Source-side backup of the live source's rendered table SQL.
+        // Same convention as the module path — auditable pair on disk.
+        string? sourceBackup = captureSourceBackup
+            ? _backups.WriteObject(runStamp, BackupRole.Source, sourceEnv, source.Type, id, source.Definition)
+            : null;
+
+        string? zipPath = null;
+        if (zipPair)
+        {
+            var stamp   = DateTime.Now.ToString("yyyyMMddHHmmssfff");
+            var zipName = $"{id.Name}_{sourceEnv}_to_{targetEnv}_ALTER_{stamp}.zip";
+            var zipPaths = new[] { sourceBackup, targetBackup }
+                .Where(p => !string.IsNullOrEmpty(p))
+                .Cast<string>()
+                .ToArray();
+            if (zipPaths.Length > 0) zipPath = _backups.ZipFiles(zipName, zipPaths);
+        }
+
+        var safe = plan.SafeSteps.Count;
+        var appliedDest = destructiveToApply.Count;
+        var msg = appliedDest == 0
+            ? $"ALTER applied: {safe} safe change(s)."
+            : $"ALTER applied: {safe} safe + {appliedDest} approved destructive change(s).";
+        if (skippedDestructive > 0)
+            msg += $" {skippedDestructive} destructive change(s) skipped.";
+
+        _logger.Log(zipPath is not null
+            ? $"Sync {id} {sourceEnv}->{targetEnv} ALTER OK, zip={zipPath}"
+            : $"Sync {id} {sourceEnv}->{targetEnv} ALTER OK");
+
+        return new SyncResult(SyncStatus.Success, msg,
+            SourceBackupPath: sourceBackup,
+            TargetBackupPath: targetBackup,
+            ZipPath: zipPath,
+            AlterPlan: plan,
+            SkippedDestructiveCount: skippedDestructive);
     }
 }

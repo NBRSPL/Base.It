@@ -50,6 +50,8 @@ public class DriftDetectorTests
                 .ToList();
             return Task.FromResult<IReadOnlyList<SqlObjectRef>>(refs);
         }
+        public Task<Base.It.Core.Sql.TableMetadata?> FetchTableMetadataAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
+            => Task.FromResult<Base.It.Core.Sql.TableMetadata?>(null);
     }
 
     private static readonly ObjectIdentifier Foo = new("dbo", "Foo");
@@ -183,6 +185,9 @@ public class DriftDetectorTests
 
         public Task<IReadOnlyList<SqlObjectRef>> ListAllAsync(string conn, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<SqlObjectRef>>(Array.Empty<SqlObjectRef>());
+
+        public Task<Base.It.Core.Sql.TableMetadata?> FetchTableMetadataAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
+            => Task.FromResult<Base.It.Core.Sql.TableMetadata?>(null);
     }
 
     [Fact]
@@ -232,5 +237,8 @@ public class DriftDetectorTests
 
         public Task<IReadOnlyList<SqlObjectRef>> ListAllAsync(string conn, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<SqlObjectRef>>(Array.Empty<SqlObjectRef>());
+
+        public Task<Base.It.Core.Sql.TableMetadata?> FetchTableMetadataAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
+            => Task.FromResult<Base.It.Core.Sql.TableMetadata?>(null);
     }
 }

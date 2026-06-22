@@ -35,6 +35,10 @@ public class ChangeWatcherTests : IDisposable
         // Tests don't exercise discovery; return an empty list.
         public Task<IReadOnlyList<SqlObjectRef>> ListAllAsync(string conn, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<SqlObjectRef>>(Array.Empty<SqlObjectRef>());
+        // Tests don't exercise ALTER planning; return null so the planner
+        // is forced into the "metadata not available" branch.
+        public Task<Base.It.Core.Sql.TableMetadata?> FetchTableMetadataAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
+            => Task.FromResult<Base.It.Core.Sql.TableMetadata?>(null);
     }
 
     [Fact]
