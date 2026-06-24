@@ -75,14 +75,20 @@
             <Color x:Key="App.DiffBgColor">#7A5A00</Color>
             <Color x:Key="App.DiffFgColor">#FFF4C2</Color>
             <Color x:Key="App.DiffAccentColor">#FFC107</Color>
-            <!-- Removed (source side) — saturated deep red bg, pale red text. -->
-            <Color x:Key="App.DiffDelBgColor">#5C2333</Color>
-            <Color x:Key="App.DiffDelFgColor">#FFB3B3</Color>
-            <Color x:Key="App.DiffDelGutterColor">#F85149</Color>
-            <!-- Added (target side) — saturated deep green bg, pale green text. -->
-            <Color x:Key="App.DiffAddBgColor">#21392B</Color>
-            <Color x:Key="App.DiffAddFgColor">#B6F0B6</Color>
-            <Color x:Key="App.DiffAddGutterColor">#3FB950</Color>
+            <!-- Vivid bright red / lawn green — user-picked: bright,
+                 saturated, unmistakable on a dark page. White text
+                 inside the red patch and black text inside the green
+                 patch for max contrast. -->
+            <!-- 40% alpha (0x66) over the bright red / green so the
+                 patch reads as a translucent wash, not a solid block —
+                 closer to a real highlighter pen. The hue is preserved
+                 but the saturation feels lifted. -->
+            <Color x:Key="App.DiffDelBgColor">#66ED1C24</Color>
+            <Color x:Key="App.DiffDelFgColor">#FFFFFF</Color>
+            <Color x:Key="App.DiffDelGutterColor">#ED1C24</Color>
+            <Color x:Key="App.DiffAddBgColor">#6622C55E</Color>
+            <Color x:Key="App.DiffAddFgColor">#FFFFFF</Color>
+            <Color x:Key="App.DiffAddGutterColor">#22C55E</Color>
             <!-- Subtle whitespace-change marker — slightly lifted off the
                  background so the eye sees the change without it
                  competing with the actual edit highlight beside it. -->
@@ -241,12 +247,18 @@
             <Color x:Key="App.DiffBgColor">#FFF176</Color>
             <Color x:Key="App.DiffFgColor">#1A1209</Color>
             <Color x:Key="App.DiffAccentColor">#F57F17</Color>
-            <Color x:Key="App.DiffDelBgColor">#FFDCE0</Color>
-            <Color x:Key="App.DiffDelFgColor">#82071E</Color>
-            <Color x:Key="App.DiffDelGutterColor">#CF222E</Color>
-            <Color x:Key="App.DiffAddBgColor">#CCFFD8</Color>
-            <Color x:Key="App.DiffAddFgColor">#0D4E1F</Color>
-            <Color x:Key="App.DiffAddGutterColor">#1A7F37</Color>
+            <!-- Same translucent-wash approach as dark theme. 40% alpha
+                 (0x66) red / green over a white page reads as soft
+                 pink / pale-green — definitely "highlight" not "block".
+                 fg goes dark instead of white because the translucent
+                 wash isn't dark enough to support white text on a
+                 white page underneath. -->
+            <Color x:Key="App.DiffDelBgColor">#66ED1C24</Color>
+            <Color x:Key="App.DiffDelFgColor">#7F1D1D</Color>
+            <Color x:Key="App.DiffDelGutterColor">#ED1C24</Color>
+            <Color x:Key="App.DiffAddBgColor">#6622C55E</Color>
+            <Color x:Key="App.DiffAddFgColor">#14532D</Color>
+            <Color x:Key="App.DiffAddGutterColor">#22C55E</Color>
             <Color x:Key="App.DiffWhitespaceColor">#F0F0EA</Color>
             <Color x:Key="App.FindMatchBgColor">#FFE5A3</Color>
             <Color x:Key="App.FindMatchFgColor">#3B2A00</Color>

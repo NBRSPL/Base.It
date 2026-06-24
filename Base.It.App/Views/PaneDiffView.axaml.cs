@@ -38,6 +38,14 @@ public partial class PaneDiffView : UserControl
     /// </summary>
     private readonly List<(ScrollViewer Scroll, SelectableTextBlock Text)> _paneScrolls = new();
 
+    /// <summary>
+    /// Re-entrancy guard for <see cref="OnPaneScrollChanged"/>: setting
+    /// one pane's offset fires ScrollChanged on it, which would loop
+    /// straight back into the handler. Flag flips true for the duration
+    /// of one fan-out.
+    /// </summary>
+    private bool _syncingScroll;
+
     public PaneDiffView()
     {
         AvaloniaXamlLoader.Load(this);
@@ -123,9 +131,16 @@ public partial class PaneDiffView : UserControl
         var host = this.FindControl<Grid>("PanesHost");
         if (host is null || _vm is null) return;
 
+        // Detach ScrollChanged from the old viewers before we orphan
+        // them. Without this, the closures keep a live reference back
+        // to PaneDiffView via the handler delegate — fine for GC
+        // eventually, but the dead viewers would still fire their
+        // last layout-driven ScrollChanged and the handler would try
+        // to update the brand-new ones with stale offsets.
+        foreach (var (sv, _) in _paneScrolls) sv.ScrollChanged -= OnPaneScrollChanged;
+        _paneScrolls.Clear();
         host.Children.Clear();
         host.ColumnDefinitions.Clear();
-        _paneScrolls.Clear();
 
         var panes = _vm.Panes.ToArray();
         if (panes.Length == 0) return;
@@ -139,7 +154,10 @@ public partial class PaneDiffView : UserControl
 
         for (int i = 0; i < panes.Length; i++)
         {
-            var pane = BuildPane(panes[i]);
+            // The last pane's header carries the change-nav arrows so
+            // they sit at the right edge of the preview, level with
+            // the copy icons. isLast = (i == panes.Length - 1).
+            var pane = BuildPane(panes[i], isLast: i == panes.Length - 1);
             Grid.SetColumn(pane, i * 2);
             host.Children.Add(pane);
 
@@ -159,9 +177,39 @@ public partial class PaneDiffView : UserControl
         }
     }
 
-    private Control BuildPane(EnvPane pane)
+    /// <summary>
+    /// Scroll-sync handler: any pane's scroll → push its offset to every
+    /// other pane so source and target stay aligned line-for-line as
+    /// the user scrolls. The <see cref="_syncingScroll"/> guard breaks
+    /// the obvious infinite loop. Offsets are clamped to each target
+    /// pane's max so a shorter pane doesn't overshoot.
+    /// </summary>
+    private void OnPaneScrollChanged(object? sender, ScrollChangedEventArgs e)
     {
-        var header = BuildHeader(pane);
+        if (_syncingScroll) return;
+        if (sender is not ScrollViewer src) return;
+        if (_paneScrolls.Count < 2) return;
+
+        _syncingScroll = true;
+        try
+        {
+            foreach (var (sv, _) in _paneScrolls)
+            {
+                if (ReferenceEquals(sv, src)) continue;
+                var maxX = Math.Max(0, sv.Extent.Width  - sv.Viewport.Width);
+                var maxY = Math.Max(0, sv.Extent.Height - sv.Viewport.Height);
+                var x = Math.Min(src.Offset.X, maxX);
+                var y = Math.Min(src.Offset.Y, maxY);
+                if (sv.Offset.X != x || sv.Offset.Y != y)
+                    sv.Offset = new Vector(x, y);
+            }
+        }
+        finally { _syncingScroll = false; }
+    }
+
+    private Control BuildPane(EnvPane pane, bool isLast)
+    {
+        var header = BuildHeader(pane, isLast);
 
         var text = new SelectableTextBlock
         {
@@ -181,7 +229,10 @@ public partial class PaneDiffView : UserControl
         };
         // Cache (scrollviewer, text) for ScrollToLine: change-nav buttons
         // need to drive every pane to the same line without re-querying
-        // the visual tree on every click.
+        // the visual tree on every click. Subscribing here (not in
+        // Rebuild) means each viewer is wired exactly once on creation —
+        // matching the unsubscribe in Rebuild's tear-down.
+        scroll.ScrollChanged += OnPaneScrollChanged;
         _paneScrolls.Add((scroll, text));
 
         var grid = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
@@ -200,7 +251,7 @@ public partial class PaneDiffView : UserControl
         };
     }
 
-    private Control BuildHeader(EnvPane pane)
+    private Control BuildHeader(EnvPane pane, bool isLast)
     {
         var badge = new Border
         {
@@ -249,22 +300,88 @@ public partial class PaneDiffView : UserControl
         ToolTip.SetTip(copyBtn, "Copy");
         copyBtn.Click += OnCopyPaneClick;
 
+        // Inline change-nav (only on the rightmost pane). Plain glyph
+        // buttons — transparent background, no border — sat at the
+        // right edge of the preview at the same vertical level as the
+        // copy icon. The counter shows "N / M" so the user knows where
+        // they are in the change set without a toolbar above the panes.
         var header = new Grid
         {
-            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto")
+            ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto,Auto,Auto,Auto")
         };
         Grid.SetColumn(badge,   0);
         Grid.SetColumn(meta,    1);
-        Grid.SetColumn(copyBtn, 2);
+        Grid.SetColumn(copyBtn, 5);
         header.Children.Add(badge);
         header.Children.Add(meta);
         header.Children.Add(copyBtn);
+
+        if (isLast)
+        {
+            // Counter + arrows bind to VM properties; IsVisible binds to
+            // HasChanges so they reveal themselves the moment the diff
+            // produces at least one change. Rebuilding the pane on every
+            // VM change would be wasteful, so we wire bindings once.
+            var counter = new TextBlock
+            {
+                FontSize = 11, Opacity = 0.55,
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 6, 0),
+            };
+            counter.Bind(TextBlock.TextProperty,
+                new Avalonia.Data.Binding(nameof(BatchPreviewViewModel.ChangeNavigationLabel)));
+            counter.Bind(TextBlock.IsVisibleProperty,
+                new Avalonia.Data.Binding(nameof(BatchPreviewViewModel.HasChanges)));
+            Grid.SetColumn(counter, 2);
+            header.Children.Add(counter);
+
+            var prev = BuildNavArrow(col: 3, glyph: "▲", tip: "Previous change (Shift+F3)",
+                command: nameof(BatchPreviewViewModel.PrevChangeCommand));
+            var next = BuildNavArrow(col: 4, glyph: "▼", tip: "Next change (F3)",
+                command: nameof(BatchPreviewViewModel.NextChangeCommand));
+            prev.Bind(Visual.IsVisibleProperty,
+                new Avalonia.Data.Binding(nameof(BatchPreviewViewModel.HasChanges)));
+            next.Bind(Visual.IsVisibleProperty,
+                new Avalonia.Data.Binding(nameof(BatchPreviewViewModel.HasChanges)));
+            header.Children.Add(prev);
+            header.Children.Add(next);
+        }
 
         return new Border
         {
             Padding = new Thickness(10, 6),
             Child = header
         };
+    }
+
+    /// <summary>
+    /// Build one change-nav arrow — plain triangle glyph, transparent
+    /// background, no border, hover-only tooltip. Bound to a named
+    /// command on the VM so the wrap-around behaviour (cycling
+    /// forever through the change set) stays owned by
+    /// <see cref="BatchPreviewViewModel"/>.
+    /// </summary>
+    private static Button BuildNavArrow(int col, string glyph, string tip, string command)
+    {
+        var btn = new Button
+        {
+            Padding         = new Thickness(4, 0),
+            MinWidth        = 0,
+            MinHeight       = 0,
+            Background      = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Content = new TextBlock
+            {
+                Text     = glyph,
+                FontSize = 11,
+                Opacity  = 0.75,
+            },
+        };
+        Grid.SetColumn(btn, col);
+        ToolTip.SetTip(btn, tip);
+        btn.Bind(Button.CommandProperty, new Avalonia.Data.Binding(command));
+        return btn;
     }
 
     /// <summary>
@@ -313,9 +430,11 @@ public partial class PaneDiffView : UserControl
             var line = lines[i];
             var isDiff = line.State == LineState.Different;
 
-            // 2-pane mode: we have per-segment kinds. Render each
-            // segment with the right brush — and overlay Find matches
-            // on top of whatever the segment kind was.
+            // 2-pane mode: per-segment kinds. Each kind contributes a
+            // (bg, fg) pair so the theme can tune the contrast pairing
+            // for its background — the previous "no-fg-override"
+            // approach left dark-theme text invisible against the
+            // light highlight bg.
             if (line.Segments is { Count: > 0 } segments)
             {
                 foreach (var seg in segments)
@@ -387,6 +506,22 @@ public partial class PaneDiffView : UserControl
         target.Add(run);
     }
 
+    /// <summary>
+    /// Resolve a themed brush by key. CRITICAL: pass the current
+    /// <c>ActualThemeVariant</c> — passing <c>null</c> only searches
+    /// the global resource dictionary and misses every key defined
+    /// inside <c>ResourceDictionary.ThemeDictionaries</c> (which is
+    /// where ThemeResources.axaml puts the per-theme palette).
+    /// Without the variant, the lookup silently falls through to the
+    /// hardcoded fallback — that was why every diff-colour change
+    /// I made was invisible: the renderer kept using the fallback
+    /// red/green baked into the call sites below.
+    /// </summary>
     private static IBrush ResolveBrush(string key, IBrush fallback)
-        => Application.Current!.TryGetResource(key, null, out var r) && r is IBrush b ? b : fallback;
+    {
+        var app = Application.Current;
+        if (app is null) return fallback;
+        var theme = app.ActualThemeVariant;
+        return app.TryGetResource(key, theme, out var r) && r is IBrush b ? b : fallback;
+    }
 }

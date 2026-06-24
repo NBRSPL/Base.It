@@ -576,30 +576,24 @@
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
                             <DataGridTextColumn Header="#"           Binding="{Binding Index}"   Width="50"  IsReadOnly="True"/>
-                            <!-- Object name cell — name on the left, small ✓ on
-                                 the right when the background pre-check has
-                                 confirmed every ticked target's hash matches
-                                 the source's. Tooltip explains. No icon when
-                                 IsInSync is null (not yet checked, no source,
-                                 no targets, etc.) or false (differs). The
-                                 check runs off-thread; updates marshal back
-                                 to the UI thread via Dispatcher.Post in the
-                                 VM, so this binding is thread-safe. -->
-                            <DataGridTemplateColumn Header="Object name" Width="*" IsReadOnly="True">
+                            <DataGridTextColumn Header="Object name" Binding="{Binding Name}"    Width="*"/>
+                            <!-- In-sync badge lives in its OWN column, not inside the
+                                 Object-name cell, so the name column stays a real
+                                 DataGridTextColumn — i.e. inline-editable as before.
+                                 Width=28 keeps it just wide enough for a ✓ and a
+                                 splash of padding; the icon is hidden via
+                                 ShowInSyncBadge so unchecked rows don't reserve a
+                                 visible mark. Tooltip on hover. -->
+                            <DataGridTemplateColumn Header="" Width="28" CanUserResize="False" CanUserSort="False" IsReadOnly="True">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate DataType="vm:BatchItem">
-                                        <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
-                                            <TextBlock Grid.Column="0" Text="{Binding Name}"
-                                                       VerticalAlignment="Center"
-                                                       TextTrimming="CharacterEllipsis"/>
-                                            <TextBlock Grid.Column="1" Text="✓"
-                                                       Foreground="{DynamicResource App.InSyncBrush}"
-                                                       FontSize="13" FontWeight="Bold"
-                                                       Margin="6,0,8,0"
-                                                       VerticalAlignment="Center"
-                                                       IsVisible="{Binding ShowInSyncBadge}"
-                                                       ToolTip.Tip="{Binding SyncCheckHint}"/>
-                                        </Grid>
+                                        <TextBlock Text="✓"
+                                                   Foreground="{DynamicResource App.InSyncBrush}"
+                                                   FontSize="13" FontWeight="Bold"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   IsVisible="{Binding ShowInSyncBadge}"
+                                                   ToolTip.Tip="{Binding SyncCheckHint}"/>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
