@@ -4,33 +4,6 @@ using Avalonia.Media;
 
 namespace Base.It.App.ViewModels;
 
-/// <summary>
-/// Bridges a <see cref="DateTimeOffset"/>? VM property to a
-/// <see cref="DateTime"/>? control property (CalendarDatePicker.SelectedDate
-/// only takes DateTime). Treats the VM value as already in local time —
-/// snipping the offset is fine because the picker shows wall-clock dates,
-/// not absolute instants. ConvertBack maps the picker's chosen date back
-/// to a DateTimeOffset at the same wall-clock local time.
-/// </summary>
-public sealed class DateTimeOffsetToDateTimeConverter : IValueConverter
-{
-    public static readonly DateTimeOffsetToDateTimeConverter Instance = new();
-
-    public object? Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        if (value is DateTimeOffset dto) return dto.LocalDateTime;
-        if (value is DateTime dt)        return dt;
-        return null;
-    }
-
-    public object? ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)
-    {
-        if (value is DateTime dt)        return new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Local));
-        if (value is DateTimeOffset dto) return dto;
-        return null;
-    }
-}
-
 /// <summary>Returns a right-arrow when collapsed, down-arrow when expanded. Ascii so no font dependency.</summary>
 public sealed class ExpanderGlyphConverter : IValueConverter
 {
