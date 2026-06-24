@@ -352,13 +352,16 @@
                                         </Grid>
                                     </Border>
 
-                                    <DataGrid ItemsSource="{Binding Entries}"
+                                    <DataGrid x:Name="EntriesGrid"
+                                              ItemsSource="{Binding Entries}"
                                               SelectedItem="{Binding SelectedEntry}"
                                               AutoGenerateColumns="False"
                                               GridLinesVisibility="Horizontal"
                                               HeadersVisibility="None"
                                               CanUserReorderColumns="False"
-                                              SelectionMode="Single"
+                                              SelectionMode="Extended"
+                                              ClipboardCopyMode="None"
+                                              KeyDown="OnEntriesGridKeyDown"
                                               IsReadOnly="True"
                                               IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNotNull}}">
                                         <DataGrid.Columns>
@@ -770,7 +773,9 @@
                                           AutoGenerateColumns="False"
                                           GridLinesVisibility="Horizontal"
                                           HeadersVisibility="None"
-                                          SelectionMode="Single"
+                                          SelectionMode="Extended"
+                                          ClipboardCopyMode="None"
+                                          KeyDown="OnDiffGridKeyDown"
                                           HorizontalAlignment="Stretch">
                                     <DataGrid.Columns>
                                         <!-- col 0: row select Button. Header version of

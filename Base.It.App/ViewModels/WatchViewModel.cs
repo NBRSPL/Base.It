@@ -600,6 +600,7 @@ public sealed partial class WatchViewModel : ObservableObject
 
         var exported = new List<string>();
         var newlyCreated = 0;
+        var failures = new List<(string Name, string Reason)>();
         foreach (var row in rowsToExport)
         {
             try
@@ -615,21 +616,36 @@ public sealed partial class WatchViewModel : ObservableObject
                     if (!result.ExistedBefore) newlyCreated++;
                 }
             }
-            catch { /* best-effort */ }
+            catch (Exception ex)
+            {
+                // Previously this was a silent catch which meant the user
+                // saw "Nothing was written" with no clue why. Capture per-
+                // row reasons so the surfaced toast / status line tells
+                // them which object(s) failed and the first error message.
+                failures.Add((row.ObjectName, ex.InnerException?.Message ?? ex.Message));
+            }
         }
 
         if (exported.Count == 0)
         {
-            Status = "Nothing was written — check your DACPAC folder.";
-            _svc.Toasts.Warning("Nothing written", "Check that the DACPAC folder exists and is writable.");
+            var detail = failures.Count == 0
+                ? "Check that the DACPAC folder exists and is writable."
+                : $"{failures.Count} row(s) failed. First: {failures[0].Name} — {failures[0].Reason}";
+            Status = $"DACPAC export ({label}): nothing written. {detail}";
+            _svc.Toasts.Warning("DACPAC: nothing written", detail);
             return;
         }
 
         var updated = exported.Count - newlyCreated;
         var tally   = $"{updated} updated / {newlyCreated} new";
+        var failHint = failures.Count == 0 ? "" : $"  ·  {failures.Count} row(s) failed (first: {failures[0].Name})";
 
-        Status = $"DACPAC export ({label}): {tally} — written to {exporter.Options.RootFolder}.";
-        _svc.Toasts.Success($"DACPAC export ({label})", $"{tally} — written to {exporter.Options.RootFolder}");
+        Status = $"DACPAC export ({label}): {tally} — written to {exporter.Options.RootFolder}.{failHint}";
+        if (failures.Count == 0)
+            _svc.Toasts.Success($"DACPAC export ({label})", $"{tally} — written to {exporter.Options.RootFolder}");
+        else
+            _svc.Toasts.Warning($"DACPAC export ({label}) — partial",
+                $"{tally}, but {failures.Count} row(s) failed. First: {failures[0].Name} — {failures[0].Reason}");
     }
 
     // ---- Watcher lifecycle -------------------------------------------------

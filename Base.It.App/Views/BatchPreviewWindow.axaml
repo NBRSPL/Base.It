@@ -20,7 +20,10 @@
         <!-- Reusable diff-pane host. Status text + per-endpoint failure
              block + side-by-side pane rendering all live in PaneDiffView
              so the inline Sync screen and this standalone Window share
-             one renderer. -->
+             one renderer. The change-navigation arrows (▲ / ▼) and
+             counter render inside the rightmost pane's header — plain
+             glyphs, no chrome, level with the per-pane Copy icon. F3 /
+             Shift+F3 fire the same commands from code-behind. -->
         <v:PaneDiffView Grid.Row="1" x:Name="PaneHost"
                         DataContext="{Binding}"/>
 

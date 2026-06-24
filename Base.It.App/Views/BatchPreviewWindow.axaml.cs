@@ -23,11 +23,14 @@ public partial class BatchPreviewWindow : Window
         DataContextChanged += (_, _) => Bind();
         Opened += (_, _) => Services.WindowSizing.ClampToWorkingArea(this);
         Opened += async (_, _) => { if (_vm is not null) await _vm.LoadAsync(); };
+        Closed += (_, _) => Unbind();
 
-        // Window-wide Ctrl+F so the find overlay is reachable from
-        // anywhere in this window — mirrors MainWindow's behaviour so
-        // the keystroke means the same thing in every Window that
-        // shows text content. Esc closes via OnFindBoxKeyDown.
+        // Window-wide keystrokes:
+        //   Ctrl+F          → open find overlay
+        //   F3              → next change
+        //   Shift+F3        → previous change
+        // Mirrors IDE diff conventions so muscle memory works here.
+        // Esc closes the find overlay via OnFindBoxKeyDown.
         AddHandler(KeyDownEvent, OnGlobalKeyDown,
             Avalonia.Interactivity.RoutingStrategies.Bubble | Avalonia.Interactivity.RoutingStrategies.Tunnel);
     }
@@ -61,6 +64,16 @@ public partial class BatchPreviewWindow : Window
         {
             OpenFindOverlay();
             e.Handled = true;
+            return;
+        }
+        // F3 family — only fire when the find textbox doesn't have
+        // focus so the user can still type 'F3' into a search if they
+        // ever needed to. The find overlay's own KeyDown handles Esc.
+        if (e.Key == Key.F3 && _vm is not null)
+        {
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) _vm.PrevChangeCommand.Execute(null);
+            else                                            _vm.NextChangeCommand.Execute(null);
+            e.Handled = true;
         }
     }
 
@@ -92,9 +105,29 @@ public partial class BatchPreviewWindow : Window
 
     private void Bind()
     {
+        Unbind();
         _vm = DataContext as BatchPreviewViewModel;
+        if (_vm is not null) _vm.ScrollToLineRequested += OnScrollToLineRequested;
         // PaneDiffView binds to the same DataContext via XAML; no
-        // additional wiring needed here.
+        // additional wiring needed there.
+    }
+
+    private void Unbind()
+    {
+        if (_vm is null) return;
+        _vm.ScrollToLineRequested -= OnScrollToLineRequested;
+        _vm = null;
+    }
+
+    /// <summary>
+    /// VM raised <c>ScrollToLineRequested(lineIndex)</c> from a Next/Prev
+    /// change click. Hand it to the embedded PaneDiffView which knows
+    /// how to drive every pane's ScrollViewer in lockstep.
+    /// </summary>
+    private void OnScrollToLineRequested(int lineIndex)
+    {
+        var host = this.FindControl<PaneDiffView>("PaneHost");
+        host?.ScrollToLine(lineIndex);
     }
 
     private void OnClose(object? sender, RoutedEventArgs e) => Close();

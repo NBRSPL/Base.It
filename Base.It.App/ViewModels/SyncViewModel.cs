@@ -871,11 +871,42 @@ public sealed partial class SyncViewModel : ObservableObject
                     }
                     else
                     {
+                        // Live-source path: tables that already exist on the
+                        // target now route through the ALTER planner instead
+                        // of the old CREATE-and-hope path. Probe for a plan;
+                        // if one exists and the table has anything to change,
+                        // show the modal preview before executing so the user
+                        // can vet destructive steps individually. Cancel =
+                        // skip this target with no SQL run.
+                        IReadOnlyList<Base.It.Core.Sync.TableAlter.AlterStep>? approvedDestructive = null;
+                        try
+                        {
+                            var plan = await _svc.Sync.PlanTableAlterAsync(srcConn!, tgtConn!, id);
+                            if (plan is not null && !plan.IsEmpty)
+                            {
+                                var picked = await Views.AlterPreviewWindow.ShowAsync(
+                                    plan, $"{t.Environment} / {t.Database}");
+                                if (picked is null)
+                                {
+                                    parts.Add($"[{t.Environment}·{t.Database}] cancelled");
+                                    continue;
+                                }
+                                approvedDestructive = picked;
+                            }
+                        }
+                        catch
+                        {
+                            // Probe failures (auth, network) shouldn't stop
+                            // the sync — fall through to SyncAsync which
+                            // re-attempts and surfaces the real error.
+                        }
+
                         r = await _svc.Sync.SyncAsync(
                             srcConn!, tgtConn!, id, SourceEnv!, t.Environment,
                             ct: default, zipPair: true,
                             captureSourceBackup: false,
-                            runStamp: runStamp);
+                            runStamp: runStamp,
+                            approvedDestructiveAlters: approvedDestructive);
                     }
                     switch (r.Status)
                     {

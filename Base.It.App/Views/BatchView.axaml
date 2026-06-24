@@ -415,29 +415,28 @@
                 <DockPanel>
 
                     <!-- Filter strip pinned to the top of the items card.
-                         Just the status filter and live OK/Fail counters
-                         now — name filtering moved to the global Ctrl+F
-                         overlay (browser-style). One less input on the
-                         page; the filter still works, it's just summoned
-                         by keystroke instead of always-visible. -->
+                         Status combo + name-substring TextBox + live
+                         counters on the left; Remove / Clear on the right.
+                         The name filter is visible (not hidden behind
+                         Ctrl+F) so users see immediately that filtering
+                         is available — the same UX the snapshot Entries
+                         grid uses, asked for by the user. -->
                     <Border DockPanel.Dock="Top"
                             Background="{DynamicResource App.ToolbarBgBrush}"
                             BorderBrush="{DynamicResource App.StrokeBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="10,6">
-                        <!-- Left: filter + counters. Right: list-management actions
-                             (Remove selected · Clear). Both belong with the grid,
-                             not with the file-load row above. -->
                         <Grid ColumnDefinitions="Auto,Auto,Auto,Auto,Auto,*,Auto,Auto">
                             <TextBlock Grid.Column="0" Text="Status" VerticalAlignment="Center"
                                        FontSize="11" Opacity="0.7" Margin="0,0,8,0"/>
                             <ComboBox  Grid.Column="1" Width="120" MinHeight="26"
                                        ItemsSource="{Binding StatusFilterOptions}"
                                        SelectedItem="{Binding StatusFilter}"/>
-                            <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="14,0,0,0"
-                                       FontSize="11" Opacity="0.55"
-                                       Text="{Binding NameFilter, StringFormat='Filtered: {0}'}"
-                                       IsVisible="{Binding NameFilter, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+                            <TextBox   Grid.Column="2" x:Name="ItemsFilterBox"
+                                       Width="240" MinHeight="26" Margin="10,0,0,0"
+                                       Text="{Binding NameFilter, Mode=TwoWay}"
+                                       Watermark="Filter by name…"
+                                       ToolTip.Tip="Substring match on the object name. Combines with the Status filter."/>
                             <TextBlock Grid.Column="3" VerticalAlignment="Center" Margin="14,0,0,0"
                                        FontSize="11"
                                        Foreground="{DynamicResource SystemFillColorSuccessBrush}"
@@ -542,7 +541,7 @@
                               GridLinesVisibility="Horizontal"
                               CanUserReorderColumns="False"
                               SelectionMode="Extended"
-                              ClipboardCopyMode="ExcludeHeader"
+                              ClipboardCopyMode="None"
                               KeyDown="OnGridKeyDown">
                         <DataGrid.Columns>
                             <DataGridTemplateColumn Header="" Width="44" CanUserResize="False" CanUserSort="False">
@@ -578,6 +577,26 @@
                             </DataGridTemplateColumn>
                             <DataGridTextColumn Header="#"           Binding="{Binding Index}"   Width="50"  IsReadOnly="True"/>
                             <DataGridTextColumn Header="Object name" Binding="{Binding Name}"    Width="*"/>
+                            <!-- In-sync badge lives in its OWN column, not inside the
+                                 Object-name cell, so the name column stays a real
+                                 DataGridTextColumn — i.e. inline-editable as before.
+                                 Width=28 keeps it just wide enough for a ✓ and a
+                                 splash of padding; the icon is hidden via
+                                 ShowInSyncBadge so unchecked rows don't reserve a
+                                 visible mark. Tooltip on hover. -->
+                            <DataGridTemplateColumn Header="" Width="28" CanUserResize="False" CanUserSort="False" IsReadOnly="True">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate DataType="vm:BatchItem">
+                                        <TextBlock Text="✓"
+                                                   Foreground="{DynamicResource App.InSyncBrush}"
+                                                   FontSize="13" FontWeight="Bold"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center"
+                                                   IsVisible="{Binding ShowInSyncBadge}"
+                                                   ToolTip.Tip="{Binding SyncCheckHint}"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
                             <DataGridTextColumn Header="Status"      Binding="{Binding Status}"  Width="100" IsReadOnly="True"/>
                             <DataGridTemplateColumn Header="" Width="40" CanUserResize="False" CanUserSort="False">
                                 <DataGridTemplateColumn.CellTemplate>

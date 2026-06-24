@@ -68,6 +68,30 @@ public sealed partial class BatchItem : ObservableObject
     [ObservableProperty] private string      _name    = "";
     [ObservableProperty] private BatchStatus _status  = BatchStatus.Pending;
     [ObservableProperty] private string      _message = "";
+
+    /// <summary>
+    /// Tri-state outcome of the background "already in sync?" check:
+    ///   <c>null</c> = unknown (not checked yet, no source/target picked, or fetch failed)
+    ///   <c>true</c>  = the source's hash matches every ticked target's hash
+    ///   <c>false</c> = at least one target differs
+    /// Drives the small ✓ glyph in the row template via
+    /// <see cref="ShowInSyncBadge"/>. Updated on the UI thread by
+    /// <see cref="BatchViewModel.RunSyncChecksAsync"/>.
+    /// </summary>
+    [ObservableProperty] private bool?       _isInSync;
+    [ObservableProperty] private string      _syncCheckHint = "";
+
+    /// <summary>
+    /// Avalonia's <c>IsVisible</c> binds a <c>bool</c>; the tri-state
+    /// <see cref="IsInSync"/> needs a plain-bool shim so the XAML
+    /// <c>IsVisible</c> binding handles null + false the same way
+    /// (invisible). Re-raised whenever IsInSync changes.
+    /// </summary>
+    public bool ShowInSyncBadge => IsInSync == true;
+
+    partial void OnIsInSyncChanged(bool? value)
+        => OnPropertyChanged(nameof(ShowInSyncBadge));
+
     public BatchItem(string name) { _name = name; }
 
     /// <summary>Drives the inline "View" button visibility: only failed rows expose their full error.</summary>
@@ -317,6 +341,170 @@ public sealed partial class BatchViewModel : ObservableObject
         if (e.OldItems is not null)
             foreach (BatchItem it in e.OldItems) it.PropertyChanged -= OnItemPropertyChanged;
         RebuildFilteredItems();
+        // Items list changed → previous IsInSync values are at best stale,
+        // at worst wrong (new rows have no value yet). Cancel any
+        // in-flight check pass and start a fresh one.
+        QueueSyncCheckRefresh();
+    }
+
+    // ─── Background "already in sync?" pre-check ──────────────────────────
+    //
+    // For every item that has a source endpoint + at least one ticked target,
+    // we fetch source.Hash and target.Hash off-thread and set IsInSync. Used
+    // to render a small ✓ next to rows the user doesn't need to bother
+    // executing — purely informational, never blocks the user or auto-skips
+    // anything during Execute.
+    //
+    // Thread safety:
+    //   • All BatchItem property writes go through Dispatcher.UIThread.Post
+    //     so Avalonia bindings see the change on the UI thread.
+    //   • _syncCheckGate caps concurrent catalog hits at 4 so a 500-row
+    //     batch doesn't open 500 connections in parallel.
+    //   • _syncCheckCts owns the cancellation token; Execute and any
+    //     state change (source / targets / items) cancel the previous
+    //     pass before starting a new one so two passes never race.
+
+    private CancellationTokenSource? _syncCheckCts;
+    private static readonly SemaphoreSlim _syncCheckGate = new(initialCount: 4, maxCount: 4);
+
+    /// <summary>
+    /// Debounce target. Called from collection / property changes that
+    /// alter the inputs of the pre-check; cancels any running pass and
+    /// kicks a new one off on a background task. No-op when there are
+    /// no items, no source, or no ticked targets.
+    /// </summary>
+    private void QueueSyncCheckRefresh()
+    {
+        _syncCheckCts?.Cancel();
+        _syncCheckCts = new CancellationTokenSource();
+        var ct = _syncCheckCts.Token;
+        // Run on a worker; the method itself awaits per-row tasks so
+        // we don't block the UI thread setting them up.
+        _ = Task.Run(() => RunSyncChecksAsync(ct), ct);
+    }
+
+    /// <summary>
+    /// Public hook so callers (Execute click) can stop the background
+    /// pre-check before issuing real syncs — the pre-check would just
+    /// re-fetch the same catalog rows the sync is about to touch.
+    /// </summary>
+    public void CancelSyncCheck() => _syncCheckCts?.Cancel();
+
+    /// <summary>
+    /// Compare every item's source hash against each ticked target's
+    /// hash; set IsInSync accordingly. Each row's check runs through a
+    /// shared concurrency gate so big batches don't fan out into
+    /// hundreds of simultaneous catalog reads. Cancellation is honored
+    /// at every async point so stale passes drop their results cleanly.
+    /// </summary>
+    private async Task RunSyncChecksAsync(CancellationToken ct)
+    {
+        // Snapshot inputs on the UI thread before fanning out. Reading
+        // ObservableCollections from worker threads isn't safe —
+        // grabbing references + counts here keeps the worker
+        // self-contained.
+        BatchItem[] items;
+        string? srcConn;
+        List<string> targetConns;
+        try
+        {
+            items = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => Items.ToArray());
+            srcConn = (SourceEnv is null || SourceDatabase is null)
+                ? null
+                : _svc.Connections.Get(SourceEnv, SourceDatabase);
+            targetConns = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                Targets.Where(t => t.IsChecked)
+                       .Select(t => _svc.Connections.Get(t.Environment, t.Database) ?? "")
+                       .Where(c => !string.IsNullOrEmpty(c))
+                       .ToList());
+        }
+        catch (OperationCanceledException) { return; }
+
+        // No inputs → clear every row's badge so the UI doesn't show a
+        // ✓ left over from a previous pass.
+        if (string.IsNullOrEmpty(srcConn) || targetConns.Count == 0 || items.Length == 0)
+        {
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                foreach (var item in items) { item.IsInSync = null; item.SyncCheckHint = ""; }
+            });
+            return;
+        }
+
+        // Per-row check task. Each one awaits the shared gate so we cap
+        // concurrent SQL fetches; the gate is process-wide so two
+        // BatchViewModels can coexist without exploding the pool.
+        var tasks = items.Select(item => Task.Run(async () =>
+        {
+            await _syncCheckGate.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                ct.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(item.Name)) return;
+
+                ObjectIdentifier id;
+                try { id = ObjectIdentifier.Parse(item.Name.Trim()); }
+                catch { return; }
+
+                var srcObj = await _svc.Scripter.GetObjectAsync(srcConn!, id, ct).ConfigureAwait(false);
+                if (srcObj is null)
+                {
+                    // Source doesn't have it → not strictly "in sync";
+                    // null badge keeps it clear that we have no answer.
+                    await SetInSyncAsync(item, isInSync: null, hint: "Source object not found").ConfigureAwait(false);
+                    return;
+                }
+
+                bool allMatch = true;
+                foreach (var tc in targetConns)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    var tObj = await _svc.Scripter.GetObjectAsync(tc, id, ct).ConfigureAwait(false);
+                    if (tObj is null || !string.Equals(tObj.Hash, srcObj.Hash, StringComparison.OrdinalIgnoreCase))
+                    {
+                        allMatch = false;
+                        break;
+                    }
+                }
+
+                await SetInSyncAsync(
+                    item,
+                    isInSync: allMatch,
+                    hint: allMatch
+                        ? targetConns.Count == 1 ? "In sync with target" : $"In sync with all {targetConns.Count} target(s)"
+                        : "Differs from at least one target")
+                .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { /* expected — pass was superseded */ }
+            catch
+            {
+                // Network / auth issues shouldn't crash a check pass;
+                // leave the row's IsInSync as-is so it appears unknown.
+            }
+            finally
+            {
+                _syncCheckGate.Release();
+            }
+        }, ct)).ToArray();
+
+        try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+        catch (OperationCanceledException) { /* superseded */ }
+    }
+
+    /// <summary>
+    /// Marshals an IsInSync / hint update onto the UI thread so
+    /// Avalonia bindings see the change from the dispatcher.
+    /// Fire-and-forget — the caller doesn't depend on the ordering of
+    /// row updates, only on each one eventually landing.
+    /// </summary>
+    private static Task SetInSyncAsync(BatchItem item, bool? isInSync, string hint)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+        {
+            item.IsInSync      = isInSync;
+            item.SyncCheckHint = hint;
+        });
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -865,6 +1053,9 @@ public sealed partial class BatchViewModel : ObservableObject
         OnPropertyChanged(nameof(IsSwapVisible));
         OnPropertyChanged(nameof(TargetSelectedCount));
         OnPropertyChanged(nameof(TargetTotalCount));
+        // Target selection changed → in-sync answers from any previous
+        // pass are stale (they were measured against a different set).
+        QueueSyncCheckRefresh();
     }
 
     [RelayCommand]
@@ -1173,6 +1364,21 @@ public sealed partial class BatchViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Surface a toast after the view copies a batch of object names to
+    /// the clipboard. View owns the clipboard call (TopLevel access lives
+    /// in the visual tree); VM just routes the count into the shared
+    /// toast service so the user gets the same confirmation shape Batch
+    /// uses elsewhere ("Pasted from clipboard", "Rows removed", …).
+    /// </summary>
+    public void NotifyCopied(int count)
+    {
+        if (count <= 0) return;
+        _svc.Toasts.Info(
+            "Copied to clipboard",
+            count == 1 ? "1 object name copied." : $"{count} object names copied.");
+    }
+
+    /// <summary>
     /// Append items from clipboard / external paste. Splits on CR/LF,
     /// trims each line, drops blanks, and skips entries that are
     /// already in <see cref="Items"/> (case-insensitive on Name) so a
@@ -1287,6 +1493,12 @@ public sealed partial class BatchViewModel : ObservableObject
             _svc.Toasts.Warning(emptyMsg, $"Nothing in {scopeLabel} to run.");
             return;
         }
+
+        // Free the background pre-check pool before we issue real syncs —
+        // the check would just re-fetch what the sync is about to mutate,
+        // so cancelling here keeps the worker thread + concurrency gate
+        // available for the actual work.
+        CancelSyncCheck();
 
         // Major-action gate: Execute mutates every ticked target. Confirm
         // before running so a stray click doesn't push 30 procs to PROD.
@@ -1505,16 +1717,30 @@ public sealed partial class BatchViewModel : ObservableObject
                             // pair zips would be duplicative noise.
                             // captureSourceBackup: false — we already wrote
                             // the source-side backup once above.
+                            // approvedDestructiveAlters: null — Batch runs
+                            // unattended. SyncService will apply the safe
+                            // ALTER subset and skip every destructive step;
+                            // we surface the skipped count below so the
+                            // user knows which rows still need a single-
+                            // execute pass on the Sync screen.
                             var r = await _svc.Sync.SyncAsync(
                                 srcConn!, tgtConn!, id, SourceEnv!, t.Environment,
                                 ct: default, zipPair: false,
                                 captureSourceBackup: false,
-                                runStamp: batchRunStamp);
+                                runStamp: batchRunStamp,
+                                approvedDestructiveAlters: null);
                             if (r.TargetBackupPath is not null) batchBackupPaths.Add(r.TargetBackupPath);
                             switch (r.Status)
                             {
                                 case SyncStatus.Success:
-                                    perTargetMsgs.Add($"[{t.Environment}·{t.Database}] ok");
+                                    // Surface ALTER-skipped-destructive counts in
+                                    // the row's message so the user can spot
+                                    // tables that need attention without
+                                    // opening logs. Plain "ok" otherwise.
+                                    var okMsg = r.SkippedDestructiveCount > 0
+                                        ? $"[{t.Environment}·{t.Database}] ok ({r.SkippedDestructiveCount} destructive change(s) skipped — review on Sync screen)"
+                                        : $"[{t.Environment}·{t.Database}] ok";
+                                    perTargetMsgs.Add(okMsg);
                                     itemOk++;
                                     break;
                                 case SyncStatus.NotFound:

@@ -138,6 +138,7 @@ public sealed partial class SnapshotsViewModel : ObservableObject
 
     [ObservableProperty] private EndpointPick? _selectedEndpoint;
 
+
     // --- Snapshot list + selected snapshot --------------------------
 
     public ObservableCollection<SnapshotSummaryVm> Snapshots { get; } = new();
@@ -1159,4 +1160,22 @@ public sealed partial class SnapshotsViewModel : ObservableObject
     // the Entries-grid filter. The grid has its own filter textbox; the
     // two should stay separate (OS-standard Ctrl+F doesn't drive a list
     // filter elsewhere in the app either).
+
+
+    /// <summary>
+    /// Surface a toast after the view copies a batch of object names to
+    /// the clipboard. View owns the actual copy (clipboard access lives
+    /// on the visual tree); the VM just owns the feedback channel so
+    /// every grid on the page can route through the same toast service
+    /// without each view code-behind having to know about
+    /// <c>AppServices.Toasts</c>.
+    /// </summary>
+    public void NotifyCopied(int count)
+    {
+        if (count <= 0) return;
+        _svc.Toasts.Info(
+            "Copied to clipboard",
+            count == 1 ? "1 object name copied." : $"{count} object names copied.");
+    }
+
 }
