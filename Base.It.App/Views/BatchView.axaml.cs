@@ -20,6 +20,13 @@ public partial class BatchView : UserControl
         WireSourceFilter();
     }
 
+    /// <summary>Export the currently-visible batch rows (after filter + sort) to CSV.</summary>
+    private async void OnExportCsvClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not BatchViewModel vm) return;
+        await Services.CsvExport.SaveAsync(this, vm, vm.Toasts);
+    }
+
     /// <summary>
     /// Focus → open the dropdown immediately. AutoCompleteBox normally
     /// shows the popup only after the user types, which makes the control

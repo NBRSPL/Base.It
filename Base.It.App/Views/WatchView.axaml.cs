@@ -50,6 +50,13 @@ public partial class WatchView : UserControl
         vm.RequestPreview(row);
     }
 
+    /// <summary>Export every drift row (all sections, current sort) to CSV.</summary>
+    private async void OnExportCsvClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not WatchViewModel vm) return;
+        await Services.CsvExport.SaveAsync(this, vm, vm.Toasts);
+    }
+
     private void OnPreviewRequested(BatchPreviewViewModel preview)
     {
         var owner = TopLevel.GetTopLevel(this) as Window;

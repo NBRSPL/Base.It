@@ -23,9 +23,14 @@
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
 
-                <Button Grid.Column="2" Content="Restore"
-                        IsVisible="{Binding ExpandedPane, Converter={x:Static ObjectConverters.IsNotNull}}"
-                        Command="{Binding RestoreCommand}"/>
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                    <Button Content="Export CSV"
+                            Click="OnExportCsvClick"
+                            ToolTip.Tip="Save this comparison as a table — a Line column plus one column per environment."/>
+                    <Button Content="Restore"
+                            IsVisible="{Binding ExpandedPane, Converter={x:Static ObjectConverters.IsNotNull}}"
+                            Command="{Binding RestoreCommand}"/>
+                </StackPanel>
             </Grid>
         </Border>
 

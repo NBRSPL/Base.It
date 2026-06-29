@@ -44,9 +44,15 @@ public sealed partial class ScriptItem : ObservableObject
 /// Use case: revert a batch sync by executing the previously-captured
 /// backup .sql files against the targets that drifted.
 /// </summary>
-public sealed partial class ScriptsViewModel : ObservableObject
+public sealed partial class ScriptsViewModel : ObservableObject, ICsvExportable
 {
     private readonly AppServices _svc;
+
+    /// <summary>Click-to-sort state for the files grid (File / Status columns).</summary>
+    public ColumnSorter Sorter { get; } = new();
+
+    /// <summary>Exposed so the View's Export handler can fire the result toast.</summary>
+    public ToastService Toasts => _svc.Toasts;
 
     [ObservableProperty] private bool   _isBusy;
     [ObservableProperty] private string _status = "Drop .sql files / a folder, or pick them, then choose targets and Execute.";
@@ -256,6 +262,7 @@ public sealed partial class ScriptsViewModel : ObservableObject
         {
             Status = $"Added {added} script file(s). Total: {Items.Count}.";
             _svc.Toasts.Success("Scripts added", $"{added} added · {Items.Count} total.");
+            ApplySort();
         }
         return added;
     }
@@ -367,6 +374,61 @@ public sealed partial class ScriptsViewModel : ObservableObject
     {
         for (int i = 0; i < Items.Count; i++) Items[i].Index = i + 1;
     }
+
+    // ─────────────────────────── Sorting ───────────────────────────
+
+    private static readonly IReadOnlyDictionary<string, Func<ScriptItem, object?>> SortSelectors =
+        new Dictionary<string, Func<ScriptItem, object?>>
+        {
+            ["File"]   = i => i.FileName,
+            ["Status"] = i => i.Status.ToString(),
+        };
+
+    public string FileSortIndicator   => Sorter.Indicator("File");
+    public string StatusSortIndicator => Sorter.Indicator("Status");
+
+    /// <summary>Header click → cycle the column's sort and reorder the rows in place.</summary>
+    [RelayCommand]
+    private void ToggleSort(string? key)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+        Sorter.Toggle(key);
+        ApplySort();
+        OnPropertyChanged(nameof(FileSortIndicator));
+        OnPropertyChanged(nameof(StatusSortIndicator));
+    }
+
+    /// <summary>
+    /// Reorder <see cref="Items"/> in place to match the active sort. Done
+    /// by snapshot → Clear → re-add; the lists here are user-managed and
+    /// small, so the churn is negligible. Renumber runs via CollectionChanged.
+    /// </summary>
+    public void ApplySort()
+    {
+        if (Sorter.ActiveKey is null) return;
+        var ordered = Sorter.Apply(Items.ToList(), SortSelectors).ToList();
+        Items.Clear();
+        foreach (var it in ordered) Items.Add(it);
+    }
+
+    // ───────────────────────── CSV export ──────────────────────────
+
+    public string CsvSuggestedFileName => "scripts.csv";
+
+    public IReadOnlyList<string> CsvHeaders { get; } =
+        new[] { "#", "File", "Path", "Status", "Message" };
+
+    public bool HasExportableRows => Items.Count > 0;
+
+    public IEnumerable<IReadOnlyList<string?>> CsvRows() =>
+        Items.Select(i => (IReadOnlyList<string?>)new[]
+        {
+            i.Index.ToString(),
+            i.FileName,
+            i.FilePath,
+            i.Status.ToString(),
+            i.Message,
+        });
 
     /// <summary>Raised when a row's eye icon is clicked. The view subscribes to open the preview window.</summary>
     public event Action<BatchPreviewViewModel>? PreviewRequested;

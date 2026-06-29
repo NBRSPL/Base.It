@@ -13,7 +13,7 @@ namespace Base.It.App.ViewModels;
 /// every ticked target executes the query and the results are listed
 /// per-target.
 /// </summary>
-public sealed partial class QueryViewModel : ObservableObject
+public sealed partial class QueryViewModel : ObservableObject, ICsvExportable
 {
     private readonly AppServices _svc;
 
@@ -21,6 +21,15 @@ public sealed partial class QueryViewModel : ObservableObject
     [ObservableProperty] private string _results = "";
     [ObservableProperty] private bool   _isBusy;
     [ObservableProperty] private string _status  = "Idle.";
+
+    /// <summary>Exposed so the View's Export handler can fire the result toast.</summary>
+    public ToastService Toasts => _svc.Toasts;
+
+    // Structured capture of the most recent run's result-set rows, so the
+    // results — shown as text in the pane — can still be exported as proper
+    // CSV. A leading "Target" column distinguishes rows across targets.
+    private List<string> _exportColumns = new() { "Target" };
+    private readonly List<string?[]> _exportRows = new();
 
     public ObservableCollection<TargetPickVm>  Targets         { get; } = new();
     public ObservableCollection<EndpointPick>  Endpoints       { get; } = new();
@@ -149,11 +158,14 @@ public sealed partial class QueryViewModel : ObservableObject
 
         IsBusy = true; Status = "Running..."; Results = "";
         var sb = new StringBuilder();
+        _exportColumns = new List<string> { "Target" };
+        _exportRows.Clear();
         try
         {
             foreach (var t in checkedTargets)
             {
-                sb.AppendLine($"=== [{t.Environment} / {t.Database}] ===");
+                var targetLabel = $"{t.Environment} / {t.Database}";
+                sb.AppendLine($"=== [{targetLabel}] ===");
                 var conn = _svc.Connections.Get(t.Environment, t.Database);
                 if (string.IsNullOrWhiteSpace(conn)) { sb.AppendLine("No connection string configured.\n"); continue; }
 
@@ -162,9 +174,12 @@ public sealed partial class QueryViewModel : ObservableObject
                 else if (outcome.IsResultSet && outcome.Rows is { } rows)
                 {
                     sb.AppendLine($"{rows.Columns.Count} col, {rows.Rows.Count} row(s).");
-                    sb.AppendLine(string.Join(" | ", rows.Columns.Cast<System.Data.DataColumn>().Select(c => c.ColumnName)));
+                    var colNames = rows.Columns.Cast<System.Data.DataColumn>().Select(c => c.ColumnName).ToList();
+                    sb.AppendLine(string.Join(" | ", colNames));
                     foreach (System.Data.DataRow row in rows.Rows)
                         sb.AppendLine(string.Join(" | ", row.ItemArray.Select(x => x?.ToString() ?? "NULL")));
+
+                    CaptureForExport(targetLabel, colNames, rows);
                 }
                 else { sb.AppendLine($"Rows affected: {outcome.RowsAffected}"); }
                 sb.AppendLine();
@@ -175,4 +190,32 @@ public sealed partial class QueryViewModel : ObservableObject
         catch (Exception ex) { Status = $"Error: {ex.Message}"; }
         finally              { IsBusy = false; }
     }
+
+    // ───────────────────────── CSV export ──────────────────────────
+    // The results pane is a per-target text dump (it can hold several
+    // result sets at once), so it isn't a single sortable grid. Export
+    // captures the result-set rows into a flat table with a leading
+    // "Target" column. Data columns come from the first result set; the
+    // common case (same query across same-schema targets) lines up exactly.
+
+    private void CaptureForExport(string target, List<string> colNames, System.Data.DataTable rows)
+    {
+        if (_exportColumns.Count == 1) // only the leading "Target" so far
+            _exportColumns.AddRange(colNames);
+
+        foreach (System.Data.DataRow row in rows.Rows)
+        {
+            var cells = new string?[_exportColumns.Count];
+            cells[0] = target;
+            var items = row.ItemArray;
+            for (int i = 0; i < items.Length && i + 1 < cells.Length; i++)
+                cells[i + 1] = items[i]?.ToString() ?? "NULL";
+            _exportRows.Add(cells);
+        }
+    }
+
+    public string CsvSuggestedFileName => "query-results.csv";
+    public IReadOnlyList<string> CsvHeaders => _exportColumns;
+    public bool HasExportableRows => _exportRows.Count > 0;
+    public IEnumerable<IReadOnlyList<string?>> CsvRows() => _exportRows;
 }
