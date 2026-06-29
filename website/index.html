@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Base.It — SQL Server schema capture, diff, sync &amp; drift watch for Windows</title>
+<meta name="description" content="Base.It is a Windows desktop tool for SQL Server database object capture, diff, sync, and drift-watching. Side-by-side compare, safe CREATE→ALTER sync, DACPAC/git staging, and live drift alerts — built for developers and DBAs." />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="logo" href="#" aria-label="Base.It home"><img src="logo.svg" alt="Base.It" /></a>
+    <nav class="links">
+      <a href="#features">Features</a>
+      <a href="#spotlights">In detail</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#developers">For developers</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn btn-primary" href="#pricing">Download for Windows</a>
+  </div>
+</header>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="wrap">
+    <span class="pill"><span class="dot"></span> Windows desktop · SQL Server · .NET 8</span>
+    <h1>Capture, diff, sync &amp; <span class="brandgrad">watch the drift</span> in your SQL Server schemas.</h1>
+    <p class="sub">Base.It is a fast Windows desktop tool that scripts database objects, shows side-by-side diffs, safely pushes changes source→target, exports DACPACs into your git branches, and streams live drift alerts — so your database stays in lockstep with your code.</p>
+    <div class="hero-cta">
+      <a class="btn btn-primary" href="#pricing">Start free trial →</a>
+      <a class="btn btn-ghost" href="#workflow">See how it works</a>
+    </div>
+    <div class="trust">
+      <span><b>Non-blocking</b> reads — never locks production SQL</span>
+      <span><b>DPAPI-encrypted</b> credentials, per-user</span>
+      <span><b>Git-aware</b> DACPAC staging</span>
+    </div>
+
+    <!-- Mockup -->
+    <div class="mock">
+      <div class="mock-bar">
+        <span class="tl r"></span><span class="tl y"></span><span class="tl g"></span>
+        <span class="title">Base.It — Compare · PROD.dbo.usp_GetOrders ↔ DEV.dbo.usp_GetOrders</span>
+      </div>
+      <div class="mock-body">
+        <div class="side">
+          <div class="navitem active"><span class="ic">⇄</span> Compare</div>
+          <div class="navitem"><span class="ic">⬆</span> Sync</div>
+          <div class="navitem"><span class="ic">▦</span> Batch</div>
+          <div class="navitem"><span class="ic">⌨</span> Query</div>
+          <div class="navitem"><span class="ic">◉</span> Watch</div>
+          <div class="navitem"><span class="ic">⚙</span> Settings</div>
+        </div>
+        <div class="diff">
+          <div class="row">
+            <div class="col">
+              <h4>Source · DEV</h4>
+              <div class="code"><span class="ln same"><span class="c">-- order lookup</span></span><span class="ln same"><span class="k">ALTER PROC</span> <span class="s">dbo.usp_GetOrders</span></span><span class="ln same">  @CustomerId <span class="k">INT</span></span><span class="ln add"> ,@FromDate <span class="k">DATE</span> = NULL</span><span class="ln same"><span class="k">AS</span></span><span class="ln same"><span class="k">SELECT</span> o.Id, o.Total</span><span class="ln add"><span class="k">FROM</span> dbo.Orders o <span class="k">WITH</span> (NOLOCK)</span><span class="ln same"><span class="k">WHERE</span> o.CustomerId = @CustomerId</span></div>
+            </div>
+            <div class="col">
+              <h4>Target · PROD</h4>
+              <div class="code"><span class="ln same"><span class="c">-- order lookup</span></span><span class="ln same"><span class="k">ALTER PROC</span> <span class="s">dbo.usp_GetOrders</span></span><span class="ln same">  @CustomerId <span class="k">INT</span></span><span class="ln del">&nbsp;</span><span class="ln same"><span class="k">AS</span></span><span class="ln same"><span class="k">SELECT</span> o.Id, o.Total</span><span class="ln del"><span class="k">FROM</span> dbo.Orders o</span><span class="ln same"><span class="k">WHERE</span> o.CustomerId = @CustomerId</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section id="features">
+  <div class="wrap">
+    <span class="eyebrow">Everything in one window</span>
+    <h2 class="sec">One tool for the whole schema lifecycle</h2>
+    <p class="lead">Six focused panes on a pure, UI-free engine. No agents to install on your servers, no schema bloat — just connect and go. Every card below reads like a diff: <span style="color:var(--good);font-weight:700">+ what you gain</span>, <span style="color:var(--danger);font-weight:700">− what you stop doing</span>.</p>
+
+    <div class="grid g3" style="margin-top:34px">
+      <div class="card"><div class="ico">⇄</div><h3>Side-by-side Compare</h3><p>Line-level diff with smart alignment between any two databases — procs, views, functions, triggers and tables.</p>
+        <ul class="difflist">
+          <li class="add">Aligned, color-coded line diff</li>
+          <li class="add">Definition-hash equality check</li>
+          <li class="del">Squinting at two SSMS tabs</li>
+        </ul></div>
+      <div class="card"><div class="ico">⬆</div><h3>Safe Sync</h3><p>Push one object source→target through a guarded pipeline so a promotion can never go in unprotected.</p>
+        <ul class="difflist">
+          <li class="add">Auto backup → CREATE→ALTER → validate → apply</li>
+          <li class="add">ScriptDom T-SQL validation pre-flight</li>
+          <li class="del">Hand-editing CREATE into ALTER</li>
+        </ul></div>
+      <div class="card"><div class="ico">▦</div><h3>Batch push</h3><p>Promote a whole feature's worth of objects in one serial run, loaded in parallel.</p>
+        <ul class="difflist">
+          <li class="add">Multi-object review-then-apply</li>
+          <li class="add">Parallel object loader</li>
+          <li class="del">One-by-one manual deploys</li>
+        </ul></div>
+      <div class="card"><div class="ico">◉</div><h3>Live Drift Watch</h3><p>Streamed drift detection, grouped by type, in-sync rows hidden automatically.</p>
+        <ul class="difflist">
+          <li class="add">Real-time streamed change feed</li>
+          <li class="add">READ UNCOMMITTED · capped parallelism</li>
+          <li class="del">Blocking production with your reads</li>
+        </ul></div>
+      <div class="card"><div class="ico">⎇</div><h3>DACPAC + Git staging</h3><p>Export into your SSDT layout (UTF-8 BOM + CRLF), updating files in place.</p>
+        <ul class="difflist">
+          <li class="add">Branch + stage ready for review</li>
+          <li class="add">New objects flagged for humans</li>
+          <li class="del">Auto-commits or surprise pushes</li>
+        </ul></div>
+      <div class="card"><div class="ico">⌨</div><h3>Ad-hoc Query runner</h3><p>A free-form query pane against any saved connection, built right in.</p>
+        <ul class="difflist">
+          <li class="add">Verify a change without leaving</li>
+          <li class="add">Any connection, instantly</li>
+          <li class="del">Alt-tabbing to a second tool</li>
+        </ul></div>
+      <div class="card"><div class="ico">🛡</div><h3>Pre-sync backups</h3><p>Every sync snapshots the target to disk first, zipped for rollback.</p>
+        <ul class="difflist">
+          <li class="add">Automatic before-state snapshot</li>
+          <li class="add">Source + target zipped together</li>
+          <li class="del">Hoping you can undo it later</li>
+        </ul></div>
+      <div class="card"><div class="ico">🔐</div><h3>Encrypted credentials</h3><p>Connection strings DPAPI-encrypted (CurrentUser scope), never beside the binary.</p>
+        <ul class="difflist">
+          <li class="add">Per-user, per-machine decryption</li>
+          <li class="add">One-time legacy appsettings import</li>
+          <li class="del">Plaintext connection strings</li>
+        </ul></div>
+      <div class="card"><div class="ico">🧾</div><h3>Hashing &amp; audit logs</h3><p>Canonicalised definition hashing with file-based daily logging.</p>
+        <ul class="difflist">
+          <li class="add">Fast equality via canonical hash</li>
+          <li class="add">Daily log of what changed, when</li>
+          <li class="del">No paper trail for changes</li>
+        </ul></div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURE SPOTLIGHTS -->
+<section id="spotlights" style="background:linear-gradient(180deg,transparent,rgba(18,28,58,.4),transparent)">
+  <div class="wrap">
+    <span class="eyebrow">In detail</span>
+    <h2 class="sec">See exactly what changes — and what it took to ship it safely</h2>
+
+    <!-- Spotlight 1: Compare -->
+    <div class="spot">
+      <div>
+        <span class="kicker">Compare</span>
+        <h3>A precise, aligned line diff</h3>
+        <p>Base.It scripts the live definition on both sides and aligns them line-for-line, so an added parameter or a new <code>WITH (NOLOCK)</code> hint jumps out in green, and removed lines in red. No guesswork about what actually differs.</p>
+        <div class="tags"><span>Stored procedures</span><span>Views</span><span>Functions</span><span>Triggers</span><span>Tables</span></div>
+      </div>
+      <div class="spot-media">
+        <div class="bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="lbl">DEV.dbo.usp_GetOrders ↔ PROD.dbo.usp_GetOrders</span></div>
+        <div class="body"><code class="codeblk"><span class="dl ctx">ALTER PROC dbo.usp_GetOrders</span><span class="dl ctx">  @CustomerId INT</span><span class="dl add">, @FromDate  DATE = NULL</span><span class="dl ctx">AS</span><span class="dl ctx">SELECT o.Id, o.Total, o.PlacedOn</span><span class="dl del">FROM dbo.Orders o</span><span class="dl add">FROM dbo.Orders o WITH (NOLOCK)</span><span class="dl ctx">WHERE o.CustomerId = @CustomerId</span><span class="dl add">  AND (@FromDate IS NULL OR o.PlacedOn >= @FromDate)</span></code></div>
+        <div class="statline"><span class="g">+3 added</span><span class="r">−1 removed</span><span class="m">5 unchanged · hash mismatch</span></div>
+      </div>
+    </div>
+
+    <!-- Spotlight 2: Safe Sync pipeline -->
+    <div class="spot flip">
+      <div>
+        <span class="kicker">Safe Sync</span>
+        <h3>A five-stage safety pipeline</h3>
+        <p>Promoting an object is never a raw <code>EXEC</code>. Base.It backs up the target, rewrites the <code>CREATE</code> to an <code>ALTER</code>, validates the T-SQL with ScriptDom, executes, then zips both sides for rollback. Every stage has to pass before the next runs.</p>
+        <div class="tags"><span>Backup-first</span><span>CREATE→ALTER</span><span>ScriptDom validate</span><span>Zip rollback</span></div>
+      </div>
+      <div class="spot-media">
+        <div class="bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="lbl">Sync · DEV → PROD · dbo.usp_GetOrders</span></div>
+        <div class="body"><code class="codeblk"><span class="dl ctx">1 ▸ snapshot target            </span><span class="dl add">✓ backup_PROD_1402.zip</span><span class="dl ctx">2 ▸ rewrite CREATE → ALTER     </span><span class="dl add">✓ ALTER PROC dbo.usp_GetOrders</span><span class="dl ctx">3 ▸ validate (ScriptDom)       </span><span class="dl add">✓ 0 errors, 0 warnings</span><span class="dl ctx">4 ▸ execute on target          </span><span class="dl add">✓ applied in 38 ms</span><span class="dl ctx">5 ▸ zip source + target        </span><span class="dl add">✓ sync_1402.zip</span></code></div>
+        <div class="statline"><span class="g">5/5 stages passed</span><span class="m">rollback artifact retained</span></div>
+      </div>
+    </div>
+
+    <!-- Spotlight 3: Drift Watch -->
+    <div class="spot">
+      <div>
+        <span class="kicker">Drift Watch</span>
+        <h3>Know the instant environments diverge</h3>
+        <p>Leave the Watch pane running and Base.It streams drift as it happens — fixed section order, in-sync rows hidden, the watcher capped at 2 parallel reads under <code>READ UNCOMMITTED</code> so it never blocks production. Drift in red, back-in-sync in green.</p>
+        <div class="tags"><span>Streamed (Channels)</span><span>Non-blocking</span><span>Grouped by type</span></div>
+      </div>
+      <div class="spot-media">
+        <div class="bar"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="lbl">Watch · PROD — live</span></div>
+        <div class="body"><code class="codeblk"><span class="dl ctx">▼ Stored Procedures</span><span class="dl del">  ✗ dbo.usp_GetOrders        drifted 14:02</span><span class="dl del">  ✗ dbo.usp_ArchiveOrders    drifted 14:03</span><span class="dl ctx">▼ Functions</span><span class="dl add">  ✓ dbo.fn_NetTotal          back in sync</span><span class="dl ctx">▼ Views</span><span class="dl del">  ✗ dbo.vw_OrderSummary      drifted 14:05</span></code></div>
+        <div class="statline"><span class="r">3 drifted</span><span class="g">1 resynced</span><span class="m">in-sync rows hidden</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WORKFLOW -->
+<section id="workflow">
+  <div class="wrap">
+    <span class="eyebrow">How it works</span>
+    <h2 class="sec">From connect to confidence in four steps</h2>
+    <div class="steps" style="margin-top:42px">
+      <div class="step"><h4>Connect</h4><p>Add your SQL Server connections once. Credentials are encrypted per-user with DPAPI and never touch the install folder.</p></div>
+      <div class="step"><h4>Compare</h4><p>Pick two environments and an object. Base.It scripts the live definitions and renders a precise, aligned line diff.</p></div>
+      <div class="step"><h4>Sync safely</h4><p>Promote changes one object or a whole batch at a time — backed up, rewritten to ALTER, validated, applied, and zipped.</p></div>
+      <div class="step"><h4>Watch</h4><p>Leave the Watch pane running to catch out-of-band drift the moment it happens, streamed live without locking your servers.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- FOR DEVELOPERS -->
+<section id="developers">
+  <div class="wrap split">
+    <div>
+      <span class="eyebrow">Built for software development</span>
+      <h2 class="sec">Treat your database like the rest of your codebase</h2>
+      <p class="lead">Base.It bridges the gap between "what's in the database" and "what's in source control" — so schema changes flow through the same review-and-promote discipline as your application code.</p>
+      <ul class="checklist">
+        <li><span class="ck">✓</span> <span><b>Source-control your schema</b> — export to your SSDT/DACPAC project and stage onto a feature branch ready for review.</span></li>
+        <li><span class="ck">✓</span> <span><b>Catch environment drift early</b> — know the instant DEV, QA and PROD diverge instead of discovering it during a release.</span></li>
+        <li><span class="ck">✓</span> <span><b>Promote with a safety net</b> — automatic backups, CREATE→ALTER rewrite, and T-SQL validation before anything runs.</span></li>
+        <li><span class="ck">✓</span> <span><b>Pure engine, scriptable future</b> — the UI-free core can power CLIs and CI checks, so your team isn't locked to one frontend.</span></li>
+        <li><span class="ck">✓</span> <span><b>Zero server footprint</b> — no agents, no extended events, no extra schema objects. It reads what's already there.</span></li>
+      </ul>
+    </div>
+    <div class="panelbox">
+      <div class="term"><span class="o"># Stage today's schema changes onto a review branch</span>
+<span class="p">base.it ▸ DACPAC export</span> <span class="o">→ db\</span>
+<span class="ok">✓</span> dbo\StoredProcedures\usp_GetOrders.sql  <span class="o">(updated in place)</span>
+<span class="ok">✓</span> dbo\Views\vw_OrderSummary.sql          <span class="o">(updated in place)</span>
+<span class="w">●</span> dbo\Functions2\fn_NetTotal.sql         <span class="o">(new — flagged for review)</span>
+
+<span class="p">base.it ▸ Git stager</span>
+<span class="ok">✓</span> branch <span class="o">schema/drift-2026-06-23</span> created
+<span class="ok">✓</span> 3 files staged
+<span class="o"># never commits or pushes — that's your call</span>
+
+<span class="p">base.it ▸ Watch · PROD</span>
+<span class="w">DRIFT</span> dbo.usp_GetOrders  <span class="o">modified 14:02</span>
+<span class="ok">SYNC</span>  dbo.vw_OrderSummary <span class="o">in sync</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section id="pricing" style="background:linear-gradient(180deg,transparent,rgba(18,28,58,.4),transparent)">
+  <div class="wrap" style="text-align:center">
+    <span class="eyebrow">Pricing</span>
+    <h2 class="sec">Fair, per-developer pricing</h2>
+    <p class="lead" style="margin:0 auto">Priced well below legacy SQL comparison suites. Pick a subscription for always-current features, or buy a perpetual license you own forever.</p>
+
+    <div class="toggle" role="tablist">
+      <button id="tab-sub" class="on" onclick="setMode('sub')">Subscription</button>
+      <button id="tab-perp" onclick="setMode('perp')">Perpetual</button>
+    </div>
+    <div class="muted" id="billnote" style="margin-top:10px;font-size:13px">Billed annually · per developer seat · 30-day money-back guarantee</div>
+
+    <div class="prices">
+      <!-- FREE -->
+      <div class="price">
+        <h3>Free</h3>
+        <div class="who">For trying it out &amp; light individual use</div>
+        <div class="amount">$0</div>
+        <div class="perpetual-note">Forever free</div>
+        <ul>
+          <li><span class="ck">✓</span> Side-by-side Compare</li>
+          <li><span class="ck">✓</span> Ad-hoc Query runner</li>
+          <li><span class="ck">✓</span> 1 saved connection</li>
+          <li><span class="ck">✓</span> Encrypted credentials</li>
+          <li><span class="no">—</span> Sync, Batch &amp; Watch</li>
+          <li><span class="no">—</span> DACPAC / git staging</li>
+        </ul>
+        <a class="btn btn-ghost" href="#">Download free</a>
+      </div>
+
+      <!-- PRO (featured) -->
+      <div class="price feature">
+        <span class="tag">MOST POPULAR</span>
+        <h3>Pro</h3>
+        <div class="who">For developers &amp; DBAs shipping schema changes</div>
+        <div class="amount" data-sub="$12<small>/mo</small>" data-perp="$249">$12<small>/mo</small></div>
+        <div class="perpetual-note" data-sub="per developer, billed annually ($144/yr)" data-perp="one-time · 1 year of updates included">per developer, billed annually ($144/yr)</div>
+        <ul>
+          <li><span class="ck">✓</span> Everything in Free</li>
+          <li><span class="ck">✓</span> Safe Sync + Batch push</li>
+          <li><span class="ck">✓</span> Live Drift Watch</li>
+          <li><span class="ck">✓</span> DACPAC export + git staging</li>
+          <li><span class="ck">✓</span> Pre-sync backups &amp; logs</li>
+          <li><span class="ck">✓</span> Unlimited connections</li>
+        </ul>
+        <a class="btn btn-primary" href="#">Start 14-day trial</a>
+      </div>
+
+      <!-- TEAM -->
+      <div class="price">
+        <h3>Team</h3>
+        <div class="who">For teams standardising DB change across environments</div>
+        <div class="amount" data-sub="$9<small>/mo</small>" data-perp="$199">$9<small>/mo</small></div>
+        <div class="perpetual-note" data-sub="per seat · 5+ seats · billed annually" data-perp="per seat · 5+ seats · 1 year of updates">per seat · 5+ seats · billed annually</div>
+        <ul>
+          <li><span class="ck">✓</span> Everything in Pro</li>
+          <li><span class="ck">✓</span> Volume seat pricing (5+)</li>
+          <li><span class="ck">✓</span> Shared connection profiles</li>
+          <li><span class="ck">✓</span> Priority support &amp; onboarding</li>
+          <li><span class="ck">✓</span> Invoicing / PO billing</li>
+          <li><span class="ck">✓</span> CI / scriptable engine access</li>
+        </ul>
+        <a class="btn btn-ghost" href="#">Talk to sales</a>
+      </div>
+    </div>
+
+    <!-- Competitive comparison -->
+    <div style="text-align:left;margin-top:46px">
+      <h3 style="font-size:18px;margin-bottom:4px">How it compares</h3>
+      <p class="muted" style="font-size:14px;margin-top:0">Indicative list pricing of comparable SQL Server schema tools (per seat).</p>
+      <table class="cmp">
+        <thead>
+          <tr><th>Tool</th><th>Model</th><th class="center">Approx. price</th><th class="center">Diff/Compare</th><th class="center">Drift watch</th><th class="center">Git/DACPAC</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><b>Base.It Pro</b></td><td>Sub or perpetual</td><td class="center"><b>$144/yr · $249 once</b></td><td class="center yes">✓</td><td class="center yes">✓</td><td class="center yes">✓</td></tr>
+          <tr><td>Redgate SQL Compare</td><td>Subscription</td><td class="center">~$535–$695/yr</td><td class="center yes">✓</td><td class="center no">—</td><td class="center yes">✓</td></tr>
+          <tr><td>dbForge Schema Compare</td><td>Perpetual</td><td class="center">~$240 once</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">partial</td></tr>
+          <tr><td>ApexSQL Diff</td><td>Subscription</td><td class="center">~$399/yr</td><td class="center yes">✓</td><td class="center no">—</td><td class="center no">partial</td></tr>
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:12.5px;margin-top:10px">Competitor prices are approximate public list prices for comparison only and may have changed; check each vendor for current figures.</p>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section id="faq">
+  <div class="wrap" style="max-width:820px">
+    <span class="eyebrow">FAQ</span>
+    <h2 class="sec">Questions, answered</h2>
+    <div style="margin-top:24px">
+      <details open><summary>What do I need to run Base.It?</summary><p>Windows (it depends on DPAPI for credential storage and the <code>git</code> CLI for DACPAC staging) and network access to your SQL Server instances. It ships as a single self-contained executable — no .NET runtime install required on the target machine.</p></details>
+      <details><summary>Will the drift watcher slow down production?</summary><p>No. Every catalog read runs under <code>READ UNCOMMITTED</code> with a short lock timeout, and drift detection caps parallelism so the watcher never blocks your production SQL. It's designed to observe, not interfere.</p></details>
+      <details><summary>Does the git integration commit or push for me?</summary><p>Never. The git stager only creates a branch and stages files. Committing, pushing, and opening PRs stay entirely in your hands, so it fits any review workflow.</p></details>
+      <details><summary>Where are my credentials stored?</summary><p>Connection strings are encrypted with Windows DPAPI under the CurrentUser scope and live in your per-user app data folder — never beside the binary. Only the same Windows user on the same machine can decrypt them.</p></details>
+      <details><summary>Subscription or perpetual — which should I pick?</summary><p>Choose subscription if you want continuous feature updates and the lowest entry cost. Choose perpetual if you prefer to own the license outright; it includes one year of updates, after which a discounted maintenance renewal keeps you current.</p></details>
+      <details><summary>Is there a free version?</summary><p>Yes — the Free tier gives you unlimited Compare and the Query runner with one saved connection, forever. Upgrade to Pro when you need Sync, Batch, Watch, and DACPAC/git staging.</p></details>
+    </div>
+  </div>
+</section>
+
+<!-- CTA BAND -->
+<section>
+  <div class="wrap">
+    <div class="band">
+      <h2>Stop discovering schema drift during a release.</h2>
+      <p class="lead" style="margin:0 auto 22px">Download Base.It and bring your SQL Server databases under the same discipline as your code.</p>
+      <a class="btn btn-primary" href="#pricing">Download for Windows →</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap foot">
+    <div>
+      <div class="logo" style="margin-bottom:8px"><img src="logo.svg" alt="Base.It" /></div>
+      <div class="muted">SQL Server schema capture, diff, sync &amp; drift watch.<br>© 2026 Base.It. Windows · .NET 8 · Avalonia.</div>
+    </div>
+    <div style="display:flex;gap:48px;flex-wrap:wrap">
+      <div><div style="color:var(--ink);font-weight:700;margin-bottom:8px">Product</div>
+        <div><a href="#features">Features</a></div><div><a href="#workflow">Workflow</a></div><div><a href="#pricing">Pricing</a></div></div>
+      <div><div style="color:var(--ink);font-weight:700;margin-bottom:8px">Resources</div>
+        <div><a href="#faq">FAQ</a></div><div><a href="#developers">For developers</a></div><div><a href="#">Documentation</a></div></div>
+    </div>
+  </div>
+</footer>
+
+<script src="main.js"></script>
+</body>
+</html>
