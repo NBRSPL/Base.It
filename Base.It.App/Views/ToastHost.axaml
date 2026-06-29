@@ -4,7 +4,7 @@
              x:Class="Base.It.App.Views.ToastHost"
              x:DataType="svc:ToastService">
 
-    <!-- Stack of toasts, pinned bottom-right. Newer toasts appear below.
+    <!-- Stack of toasts, pinned top-center. Newer toasts appear below.
          Each toast sits on a card with its kind-colored left stripe and a
          dismiss X. Font glyphs used for the indicator are plain ASCII so
          they render without requiring a specific icon font.
@@ -17,8 +17,8 @@
          buttons still receive clicks. -->
     <ItemsControl ItemsSource="{Binding Items}"
                   Background="{x:Null}"
-                  HorizontalAlignment="Right" VerticalAlignment="Bottom"
-                  Margin="0,0,18,18">
+                  HorizontalAlignment="Center" VerticalAlignment="Top"
+                  Margin="0,18,0,0">
         <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
                 <StackPanel Orientation="Vertical"/>

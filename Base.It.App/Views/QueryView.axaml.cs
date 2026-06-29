@@ -19,6 +19,13 @@ public partial class QueryView : UserControl
         WireTargetFilter();
     }
 
+    /// <summary>Export the last run's result rows to CSV.</summary>
+    private async void OnExportCsvClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not QueryViewModel vm) return;
+        await Services.CsvExport.SaveAsync(this, vm, vm.Toasts);
+    }
+
     /// <summary>Focus → open the dropdown.</summary>
     private void OnEndpointPickerGotFocus(object? sender, GotFocusEventArgs e)
     {

@@ -232,9 +232,12 @@ public sealed partial class WatchGroupItemVm : ObservableObject
 /// its own (env, db); the VM merges those into per-row per-target states
 /// so a single row can show chips for every target it differs from.
 /// </summary>
-public sealed partial class WatchViewModel : ObservableObject
+public sealed partial class WatchViewModel : ObservableObject, ICsvExportable
 {
     private readonly AppServices _svc;
+
+    /// <summary>Exposed so the View's Export handler can fire the result toast.</summary>
+    public ToastService Toasts => _svc.Toasts;
     // Composite-keyed runs: (group.Id, targetRoute.Key) → watcher run.
     private readonly Dictionary<(Guid Group, string Target), WatcherRun> _runs = new();
     // Per-group aggregate counters — summed across every target's ticks.
@@ -266,6 +269,70 @@ public sealed partial class WatchViewModel : ObservableObject
 
     /// <summary>Flat projection over every section's rows. Used by Stage / Send-to-Batch.</summary>
     public IEnumerable<DriftRowVm> LiveRows => Sections.SelectMany(s => s.Rows);
+
+    // ─────────────────────────── Sorting ───────────────────────────
+    // The Watch pane has no clickable column header (rows stream in live),
+    // so sort is driven from a toolbar control. Order is applied within
+    // each section and re-applied after every tick so it survives refreshes.
+
+    public ColumnSorter Sorter { get; } = new();
+
+    private static readonly IReadOnlyDictionary<string, Func<DriftRowVm, object?>> SortSelectors =
+        new Dictionary<string, Func<DriftRowVm, object?>>
+        {
+            ["Name"]   = r => r.ObjectName,
+            ["Status"] = r => r.PrimaryStatus,
+        };
+
+    public string NameSortIndicator   => Sorter.Indicator("Name");
+    public string StatusSortIndicator => Sorter.Indicator("Status");
+
+    [RelayCommand]
+    private void ToggleSort(string? key)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+        Sorter.Toggle(key);
+        ApplySortToSections();
+        OnPropertyChanged(nameof(NameSortIndicator));
+        OnPropertyChanged(nameof(StatusSortIndicator));
+    }
+
+    /// <summary>Reorder each section's rows in place to match the active sort (no-op when none).</summary>
+    private void ApplySortToSections()
+    {
+        if (Sorter.ActiveKey is null) return;
+        foreach (var s in Sections)
+        {
+            var ordered = Sorter.Apply(s.Rows.ToList(), SortSelectors).ToList();
+            for (int i = 0; i < ordered.Count; i++)
+            {
+                var cur = s.Rows.IndexOf(ordered[i]);
+                if (cur >= 0 && cur != i) s.Rows.Move(cur, i);
+            }
+        }
+    }
+
+    // ───────────────────────── CSV export ──────────────────────────
+
+    public string CsvSuggestedFileName => "watch-drift.csv";
+
+    public IReadOnlyList<string> CsvHeaders { get; } =
+        new[] { "Type", "Object", "Status", "Targets" };
+
+    public bool HasExportableRows => LiveRows.Any();
+
+    public IEnumerable<IReadOnlyList<string?>> CsvRows()
+    {
+        foreach (var s in Sections)
+            foreach (var r in s.Rows)
+                yield return new[]
+                {
+                    s.Title,
+                    r.ObjectName,
+                    r.PrimaryStatus,
+                    string.Join("; ", r.TargetTags.Select(t => $"{t.Label} ({t.KindLabel})")),
+                };
+    }
 
     /// <summary>
     /// Raised when the user hits "Send Changes to Batch". MainWindow
@@ -897,6 +964,7 @@ public sealed partial class WatchViewModel : ObservableObject
             }
 
             LastUpdatedText = BuildLastUpdatedText(ev.CapturedAt, agg);
+            ApplySortToSections();
         }
     }
 
@@ -1030,6 +1098,7 @@ public sealed partial class WatchViewModel : ObservableObject
         LastUpdatedText = mostRecent == DateTime.MinValue
             ? "Waiting for first tick…"
             : $"Last updated: {mostRecent.ToLocalTime():HH:mm:ss}";
+        ApplySortToSections();
     }
 
     private string BuildLastUpdatedText(DateTime at, GroupAggregate agg)

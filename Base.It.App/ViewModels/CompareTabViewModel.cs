@@ -14,9 +14,12 @@ namespace Base.It.App.ViewModels;
 /// One Compare tab: fetches a single object across configured environments and
 /// exposes the aligned-line panes plus the shared vertical scroll offset.
 /// </summary>
-public sealed partial class CompareTabViewModel : ObservableObject
+public sealed partial class CompareTabViewModel : ObservableObject, ICsvExportable
 {
     private readonly AppServices _svc;
+
+    /// <summary>Exposed so the View's Export handler can fire the result toast.</summary>
+    public ToastService Toasts => _svc.Toasts;
 
     public string ObjectName { get; }
     public string Database   { get; }
@@ -108,5 +111,30 @@ public sealed partial class CompareTabViewModel : ObservableObject
     {
         var i = obj.LastIndexOf('.');
         return i >= 0 && i < obj.Length - 1 ? obj[(i + 1)..] : obj;
+    }
+
+    // ───────────────────────── CSV export ──────────────────────────
+    // The diff itself can't be sorted (that would destroy the line
+    // alignment), but the side-by-side comparison maps cleanly to a
+    // table: a Line column plus one column per environment pane.
+
+    public string CsvSuggestedFileName => $"compare-{Label}.csv";
+
+    public IReadOnlyList<string> CsvHeaders =>
+        new[] { "Line" }.Concat(Panes.Select(p => p.Label)).ToList();
+
+    public bool HasExportableRows => Panes.Count > 0 && Panes.Any(p => p.Lines.Count > 0);
+
+    public IEnumerable<IReadOnlyList<string?>> CsvRows()
+    {
+        var maxLines = Panes.Count == 0 ? 0 : Panes.Max(p => p.Lines.Count);
+        for (int i = 0; i < maxLines; i++)
+        {
+            var cells = new string?[Panes.Count + 1];
+            cells[0] = (i + 1).ToString();
+            for (int p = 0; p < Panes.Count; p++)
+                cells[p + 1] = i < Panes[p].Lines.Count ? Panes[p].Lines[i].Text : "";
+            yield return cells;
+        }
     }
 }

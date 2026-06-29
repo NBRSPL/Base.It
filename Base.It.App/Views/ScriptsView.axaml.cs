@@ -232,6 +232,13 @@ public partial class ScriptsView : UserControl
         e.Handled = true;
     }
 
+    /// <summary>Export the files grid (current displayed order) to a CSV file.</summary>
+    private async void OnExportCsvClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not ScriptsViewModel vm) return;
+        await Services.CsvExport.SaveAsync(this, vm, vm.Toasts);
+    }
+
     private async void OnAddFilesClick(object? sender, RoutedEventArgs e)
     {
         if (DataContext is not ScriptsViewModel vm) return;

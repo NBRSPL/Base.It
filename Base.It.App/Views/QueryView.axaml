@@ -179,9 +179,13 @@
         <!-- Results area: the display -->
         <Border Grid.Row="3" Classes="card" Padding="0" MinHeight="80">
             <DockPanel>
-                <TextBlock DockPanel.Dock="Top"
-                           Text="Results" Classes="sectionTitle"
-                           Margin="10,8,10,4"/>
+                <Grid DockPanel.Dock="Top" ColumnDefinitions="*,Auto" Margin="10,8,10,4">
+                    <TextBlock Grid.Column="0" Text="Results" Classes="sectionTitle"/>
+                    <Button Grid.Column="1" Padding="8,2" MinHeight="26"
+                            Content="Export CSV"
+                            Click="OnExportCsvClick"
+                            ToolTip.Tip="Save the last run's result rows (one table, with a Target column) to a .csv file."/>
+                </Grid>
                 <ScrollViewer HorizontalScrollBarVisibility="Auto"
                               VerticalScrollBarVisibility="Auto">
                     <SelectableTextBlock Text="{Binding Results}" Classes="mono"

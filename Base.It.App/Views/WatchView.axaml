@@ -194,27 +194,50 @@
             <!-- Action row: Clear (left) · Stage* + Send (right).
                  Clear wipes the rendered rows without stopping the watchers;
                  Stage* export to DACPAC; Send pushes the changed list to Batch. -->
-            <Grid Grid.Row="2" Margin="0,8,0,0" ColumnDefinitions="Auto,*,Auto,Auto,Auto">
+            <Grid Grid.Row="2" Margin="0,8,0,0" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto,Auto,Auto">
                 <Button Grid.Column="0" Content="Clear"
                         Command="{Binding ClearResultsCommand}"
                         IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"
                         ToolTip.Tip="Wipe the visible rows. Watchers keep running; the next tick repopulates."/>
+                <!-- Sort affordances: the rows stream in live and have no
+                     clickable column header, so sorting is driven here.
+                     Each cycles A→Z / Z→A / clear and is re-applied after
+                     every tick. -->
+                <Button Grid.Column="1" Margin="6,0,0,0"
+                        Command="{Binding ToggleSortCommand}" CommandParameter="Name"
+                        ToolTip.Tip="Sort rows in every section by object name A→Z / Z→A / clear.">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Sort: Name"/>
+                        <TextBlock Text="{Binding NameSortIndicator}" Opacity="0.7"/>
+                    </StackPanel>
+                </Button>
+                <Button Grid.Column="2" Margin="6,0,0,0"
+                        Command="{Binding ToggleSortCommand}" CommandParameter="Status"
+                        ToolTip.Tip="Sort rows in every section by status A→Z / Z→A / clear.">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <TextBlock Text="Sort: Status"/>
+                        <TextBlock Text="{Binding StatusSortIndicator}" Opacity="0.7"/>
+                    </StackPanel>
+                </Button>
+                <Button Grid.Column="3" Margin="6,0,0,0" Content="Export CSV"
+                        Click="OnExportCsvClick"
+                        ToolTip.Tip="Save every drift row (across all sections, current sort) to a .csv file."/>
                 <!-- Stage buttons hidden entirely when DACPAC isn't
                      configured — they only write to the DACPAC folder, so
                      there's nothing for them to do without a folder. -->
-                <Button Grid.Column="2" Content="Stage Selected"
+                <Button Grid.Column="5" Content="Stage Selected"
                         Margin="6,0,0,0"
                         Command="{Binding StageSelectedCommand}"
                         IsVisible="{Binding DacpacConfigured}"
                         IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"
                         ToolTip.Tip="Export only the ticked rows to the DACPAC folder. No target mutation. No commit / PR."/>
-                <Button Grid.Column="3" Content="Stage All"
+                <Button Grid.Column="6" Content="Stage All"
                         Margin="6,0,0,0"
                         Command="{Binding StageAllCommand}"
                         IsVisible="{Binding DacpacConfigured}"
                         IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"
                         ToolTip.Tip="Export every syncable row to the DACPAC folder. No target mutation. No commit / PR."/>
-                <Button Grid.Column="4" Content="Send Changes to Batch" Classes="accent"
+                <Button Grid.Column="7" Content="Send Changes to Batch" Classes="accent"
                         Margin="6,0,0,0"
                         Command="{Binding SendToBatchCommand}"
                         IsEnabled="{Binding Selected, Converter={x:Static ObjectConverters.IsNotNull}}"/>
