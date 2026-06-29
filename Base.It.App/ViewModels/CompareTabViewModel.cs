@@ -5,6 +5,7 @@ using Base.It.App.Services;
 using Base.It.Core.Config;
 using Base.It.Core.Diff;
 using Base.It.Core.Models;
+using Base.It.Core.Parsing;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 
@@ -76,12 +77,18 @@ public sealed partial class CompareTabViewModel : ObservableObject, ICsvExportab
                 return;
             }
 
-            var allDefs = withContent.Select(x => x.Definition!).ToList();
-            foreach (var (profile, def) in withContent)
+            // Pretty-print every side the same way *before* diffing so the
+            // highlight reflects real changes, not cosmetic whitespace/casing
+            // differences. Best-effort: any definition ScriptDom can't parse
+            // falls back to its raw text (Format echoes the input).
+            var allDefs = withContent.Select(x => SqlFormatter.Format(x.Definition!)).ToList();
+            for (var i = 0; i < withContent.Count; i++)
             {
-                var peers = allDefs.Where(d => !ReferenceEquals(d, def));
-                var lines = LineAligner.Align(def!, peers);
-                Panes.Add(new EnvPane(profile.Label, profile.Color, def!, lines));
+                var profile = withContent[i].Profile;
+                var def     = allDefs[i];
+                var peers   = allDefs.Where(d => !ReferenceEquals(d, def));
+                var lines   = LineAligner.Align(def, peers);
+                Panes.Add(new EnvPane(profile.Label, profile.Color, def, lines));
             }
 
             var missing = collected.Count - withContent.Count;

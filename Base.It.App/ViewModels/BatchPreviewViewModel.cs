@@ -212,6 +212,11 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
         string leftLabel,  string? leftColor,  string leftDefinition,
         string rightLabel, string? rightColor, string rightDefinition)
     {
+        // Format both sides identically before diffing (see SqlFormatter) so
+        // the highlight shows real changes, not cosmetic whitespace/casing noise.
+        leftDefinition  = Base.It.Core.Parsing.SqlFormatter.Format(leftDefinition);
+        rightDefinition = Base.It.Core.Parsing.SqlFormatter.Format(rightDefinition);
+
         var vm = new BatchPreviewViewModel(svc, title, Array.Empty<PreviewEndpoint>());
         vm.Title = title;
         // Critical: tell LoadAsync to bail. BatchPreviewWindow auto-fires
@@ -330,6 +335,16 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
                 Status = $"'{_objectName}' not found in any endpoint.";
                 return;
             }
+
+            // Format every side identically before diffing (see SqlFormatter)
+            // so the highlight reflects real changes, not cosmetic whitespace /
+            // casing / line-break differences. Best-effort: anything ScriptDom
+            // can't parse is echoed back unchanged.
+            withContent = withContent
+                .Select(x => (x.Label, x.Color,
+                              Definition: (string?)Base.It.Core.Parsing.SqlFormatter.Format(x.Definition),
+                              x.Error))
+                .ToList();
 
             // Two-pane case → pair-aware aligner so the renderer paints
             // only the changed substring (whitespace edits no longer
