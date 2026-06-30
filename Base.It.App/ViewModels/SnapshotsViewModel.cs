@@ -132,6 +132,29 @@ public sealed partial class SnapshotsViewModel : ObservableObject
 {
     private readonly AppServices _svc;
 
+    /// <summary>Exposed so the View's Export handlers can fire the result toast.</summary>
+    public ToastService Toasts => _svc.Toasts;
+
+    // ───────────────────── CSV export (two grids) ──────────────────────
+
+    public bool EntriesHaveRows => Entries.Count > 0;
+    public IReadOnlyList<string> EntriesCsvHeaders { get; } =
+        new[] { "Schema", "Name", "Type", "Hash", "Size" };
+    public IEnumerable<IReadOnlyList<string?>> EntriesCsvRows() =>
+        Entries.Select(e => (IReadOnlyList<string?>)new[]
+        {
+            e.Schema, e.Name, e.Kind, e.HashShort, e.SizeDisplay,
+        });
+
+    public bool DiffHasRows => DiffRows.Count > 0;
+    public IReadOnlyList<string> DiffCsvHeaders { get; } =
+        new[] { "Status", "Name", "Type" };
+    public IEnumerable<IReadOnlyList<string?>> DiffCsvRows() =>
+        DiffRows.Select(r => (IReadOnlyList<string?>)new[]
+        {
+            r.Status, r.FullName, r.Kind,
+        });
+
     // --- Endpoint browser (top) -------------------------------------
 
     public ObservableCollection<EndpointPick> Endpoints { get; } = new();

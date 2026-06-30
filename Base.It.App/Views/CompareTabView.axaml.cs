@@ -26,6 +26,13 @@ public partial class CompareTabView : UserControl
         DetachedFromVisualTree += (_, _) => Unbind();
     }
 
+    /// <summary>Export this comparison (Line column + one per environment) to CSV.</summary>
+    private async void OnExportCsvClick(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is not CompareTabViewModel vm) return;
+        await Services.CsvExport.SaveAsync(this, vm, vm.Toasts);
+    }
+
     private void Bind()
     {
         Unbind();

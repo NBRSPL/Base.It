@@ -31,6 +31,22 @@ public partial class SnapshotsView : UserControl, ISupportsFind
 {
     private SnapshotsViewModel? _hookedVm;
 
+    /// <summary>Export the snapshot's object list (current filter + sort) to CSV.</summary>
+    private async void OnExportEntriesClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not SnapshotsViewModel vm) return;
+        await Services.CsvExport.SaveAsync(this, "snapshot-objects.csv",
+            vm.EntriesCsvHeaders, vm.EntriesCsvRows(), vm.EntriesHaveRows, vm.Toasts);
+    }
+
+    /// <summary>Export the cross-store diff rows (current filter + sort) to CSV.</summary>
+    private async void OnExportDiffClick(object? sender, RoutedEventArgs e)
+    {
+        if (DataContext is not SnapshotsViewModel vm) return;
+        await Services.CsvExport.SaveAsync(this, "snapshot-diff.csv",
+            vm.DiffCsvHeaders, vm.DiffCsvRows(), vm.DiffHasRows, vm.Toasts);
+    }
+
     public SnapshotsView()
     {
         InitializeComponent();

@@ -117,9 +117,15 @@ public sealed partial class BatchItem : ObservableObject
 /// per-target outcomes in the <see cref="BatchItem.Message"/> field;
 /// <see cref="BatchItem.Status"/> is the worst-of-all aggregate.
 /// </summary>
-public sealed partial class BatchViewModel : ObservableObject
+public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
 {
     private readonly AppServices _svc;
+
+    /// <summary>Click-to-sort state for the items grid (Object name / Status).</summary>
+    public ColumnSorter Sorter { get; } = new();
+
+    /// <summary>Exposed so the View's Export handler can fire the result toast.</summary>
+    public ToastService Toasts => _svc.Toasts;
 
     [ObservableProperty] private string? _sourceEnv;
     [ObservableProperty] private string? _sourceDatabase;
@@ -592,17 +598,62 @@ public sealed partial class BatchViewModel : ObservableObject
             _          => null
         };
         var nameNeedle = (NameFilter ?? "").Trim();
+        var matched = new List<BatchItem>();
         foreach (var it in Items)
         {
             if (want is not null && it.Status != want) continue;
             if (nameNeedle.Length > 0 &&
                 !it.Name.Contains(nameNeedle, StringComparison.OrdinalIgnoreCase))
                 continue;
-            FilteredItems.Add(it);
+            matched.Add(it);
         }
+        foreach (var it in Sorter.Apply(matched, SortSelectors))
+            FilteredItems.Add(it);
         // Filter changed → visible set changed → header glyph may need to flip.
         RefreshSelectAllState();
     }
+
+    // ─────────────────────────── Sorting ───────────────────────────
+
+    private static readonly IReadOnlyDictionary<string, Func<BatchItem, object?>> SortSelectors =
+        new Dictionary<string, Func<BatchItem, object?>>
+        {
+            ["Name"]   = i => i.Name,
+            ["Status"] = i => i.Status.ToString(),
+        };
+
+    public string NameSortIndicator   => Sorter.Indicator("Name");
+    public string StatusSortIndicator => Sorter.Indicator("Status");
+
+    /// <summary>Header click → cycle the column's sort and rebuild the visible (sorted) rows.</summary>
+    [RelayCommand]
+    private void ToggleSort(string? key)
+    {
+        if (string.IsNullOrEmpty(key)) return;
+        Sorter.Toggle(key);
+        RebuildFilteredItems();
+        OnPropertyChanged(nameof(NameSortIndicator));
+        OnPropertyChanged(nameof(StatusSortIndicator));
+    }
+
+    // ───────────────────────── CSV export ──────────────────────────
+
+    public string CsvSuggestedFileName => "batch.csv";
+
+    public IReadOnlyList<string> CsvHeaders { get; } =
+        new[] { "#", "Object name", "Status", "Message" };
+
+    public bool HasExportableRows => FilteredItems.Count > 0;
+
+    /// <summary>Exports the currently-visible rows (after filter + sort), in display order.</summary>
+    public IEnumerable<IReadOnlyList<string?>> CsvRows() =>
+        FilteredItems.Select(i => (IReadOnlyList<string?>)new[]
+        {
+            i.Index.ToString(),
+            i.Name,
+            i.Status.ToString(),
+            i.Message,
+        });
 
     private void Renumber()
     {

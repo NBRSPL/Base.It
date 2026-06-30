@@ -201,7 +201,7 @@
                                  when no snapshot is picked. -->
                             <Border Grid.Row="0" Classes="card" Padding="0">
                                 <DockPanel>
-                                    <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto"
+                                    <Grid DockPanel.Dock="Top" ColumnDefinitions="Auto,*,Auto,Auto"
                                           Margin="10,8,10,6">
                                         <!-- Title and hint both bottom-aligned so their
                                              baselines line up. The sectionTitle class
@@ -218,7 +218,12 @@
                                                    VerticalAlignment="Bottom"
                                                    Text="(select a snapshot on the left)"
                                                    IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNull}}"/>
-                                        <TextBox  Grid.Column="2" x:Name="EntryFilterBox"
+                                        <Button Grid.Column="2" Margin="0,0,6,0" Padding="8,2" MinHeight="26"
+                                                Content="Export CSV"
+                                                Click="OnExportEntriesClick"
+                                                IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                ToolTip.Tip="Save the listed objects (current filter + sort) to a .csv file."/>
+                                        <TextBox  Grid.Column="3" x:Name="EntryFilterBox"
                                                   Width="240"
                                                   Text="{Binding EntryFilter, Mode=TwoWay}"
                                                   Watermark="Filter by name or object type…"
@@ -592,7 +597,7 @@
                              grid's first column header (Button styled as a
                              checkbox), so it's NOT duplicated here. -->
                         <Grid DockPanel.Dock="Top" Margin="0,6,0,4"
-                              ColumnDefinitions="360,*,Auto,Auto"
+                              ColumnDefinitions="360,*,Auto,Auto,Auto"
                               IsVisible="{Binding DiffHasResult}">
                             <TextBox Grid.Column="0" x:Name="DiffFilterBox"
                                      Text="{Binding DiffFilter, Mode=TwoWay}"
@@ -606,10 +611,14 @@
                                 <Run Text=" selected"/>
                             </TextBlock>
                             <Button Grid.Column="2" Margin="0,0,4,0"
+                                    Content="Export CSV"
+                                    Click="OnExportDiffClick"
+                                    ToolTip.Tip="Save the diff rows (current filter + sort) to a .csv file."/>
+                            <Button Grid.Column="3" Margin="0,0,4,0"
                                     Content="Clear list"
                                     Command="{Binding ClearDiffListCommand}"
                                     ToolTip.Tip="Empty the diff result. Click Compare again to repopulate."/>
-                            <Button Grid.Column="3"
+                            <Button Grid.Column="4"
                                     Content="Send to Batch →"
                                     Classes="accent"
                                     Command="{Binding SendDiffToBatchCommand}"
