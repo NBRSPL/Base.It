@@ -105,6 +105,8 @@ public sealed class DacpacExporter
         SqlObjectType.InlineTableFunction   => "Functions",
         SqlObjectType.TableValuedFunction   => "Functions",
         SqlObjectType.Trigger               => "Triggers",
+        SqlObjectType.TableType             => "Types",
+        SqlObjectType.UserDefinedDataType   => "Types",
         _                                   => "Misc"
     };
 
@@ -122,6 +124,8 @@ public sealed class DacpacExporter
         SqlObjectType.InlineTableFunction   => "Functions2",
         SqlObjectType.TableValuedFunction   => "Functions2",
         SqlObjectType.Trigger               => "Triggers2",
+        SqlObjectType.TableType             => "Types2",
+        SqlObjectType.UserDefinedDataType   => "Types2",
         _                                   => "Misc2"
     };
 

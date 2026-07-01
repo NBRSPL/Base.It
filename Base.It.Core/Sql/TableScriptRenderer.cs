@@ -133,6 +133,66 @@ public static class TableScriptRenderer
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Renders a <c>CREATE TYPE ... AS TABLE (...)</c> definition — same
+    /// column / PK / UQ / CHECK body a real table gets, wrapped in the
+    /// type-declaration syntax instead of <c>CREATE TABLE</c>. Table types
+    /// can't have foreign keys, extra indexes, triggers, or a filegroup,
+    /// so those inputs are ignored.
+    /// </summary>
+    public static string RenderTableType(
+        string schema,
+        string name,
+        IReadOnlyList<ColumnInfo>          columns,
+        IReadOnlyList<KeyConstraintGroup>  keyConstraints,
+        IReadOnlyList<CheckConstraintInfo> checkConstraints,
+        string? dbCollation)
+    {
+        if (columns.Count == 0) return string.Empty;
+
+        var nameField = columns.Select(c => $"[{c.Name}]").ToList();
+        var typeField = columns.Select(RenderTypeSpec).ToList();
+        var maxName   = nameField.Max(s => s.Length);
+        var maxType   = typeField.Max(s => s.Length);
+
+        var sb = new System.Text.StringBuilder(capacity: 512);
+        sb.Append("CREATE TYPE [").Append(schema).Append("].[").Append(name).Append("] AS TABLE (\n");
+
+        var bodyLines = new List<string>(columns.Count + keyConstraints.Count + checkConstraints.Count);
+        for (int i = 0; i < columns.Count; i++)
+            bodyLines.Add(RenderColumn(columns[i], nameField[i], typeField[i], maxName, maxType, dbCollation));
+        foreach (var k in keyConstraints)   bodyLines.Add(RenderKeyConstraint(k));
+        foreach (var c in checkConstraints) bodyLines.Add(RenderCheckConstraint(c));
+
+        sb.Append(string.Join(",\n", bodyLines));
+        sb.Append("\n);\nGO\n");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Renders a user-defined data type (alias type):
+    /// <c>CREATE TYPE [dbo].[Money2] FROM DECIMAL(19,4) NOT NULL;</c>
+    /// Length / precision / scale semantics match <see cref="RenderTypeSpec"/>.
+    /// </summary>
+    public static string RenderUserDefinedDataType(
+        string schema, string name,
+        string baseTypeName, int maxLength, byte precision, byte scale, bool isNullable)
+    {
+        var typeSpec = RenderTypeSpec(new ColumnInfo(
+            Name: name,
+            TypeName: baseTypeName,
+            MaxLength: (short)maxLength,
+            Precision: precision,
+            Scale: scale,
+            IsNullable: isNullable,
+            IsIdentity: false, IdentitySeed: null, IdentityIncrement: null, IdentityNotForReplication: false,
+            ComputedDefinition: null, ComputedIsPersisted: null,
+            DefaultName: null, DefaultDefinition: null,
+            CollationName: null, IsRowGuidCol: false));
+        var nullability = isNullable ? "NULL" : "NOT NULL";
+        return $"CREATE TYPE [{schema}].[{name}] FROM {typeSpec} {nullability};\nGO\n";
+    }
+
     // ─── Per-element rendering helpers ─────────────────────────────────────
 
     public static string RenderColumn(

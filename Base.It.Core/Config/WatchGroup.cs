@@ -63,6 +63,8 @@ public sealed record WatchGroup(
         Models.SqlObjectType.InlineTableFunction,
         Models.SqlObjectType.TableValuedFunction,
         Models.SqlObjectType.Trigger,
+        Models.SqlObjectType.TableType,
+        Models.SqlObjectType.UserDefinedDataType,
     };
 
     public static WatchGroup Create(

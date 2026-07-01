@@ -73,6 +73,29 @@ public sealed class SyncService
                     targetBackup = _backups.WriteObject(runStamp, BackupRole.Target, targetEnv, existing.Type, id, existing.Definition);
             }
 
+            // ─── User-defined types: refuse to update in place ────────────
+            //
+            // SQL Server has no ALTER TYPE. Changing an existing UDT (table
+            // type or alias type) requires dropping every dependent object,
+            // dropping the type, recreating it, and recreating the
+            // dependents — far too destructive to bundle into this
+            // pipeline. First-time CREATE (target doesn't exist) still runs
+            // through the normal path below.
+            if (targetExists &&
+                (source.Type == SqlObjectType.TableType ||
+                 source.Type == SqlObjectType.UserDefinedDataType))
+            {
+                var kind = source.Type == SqlObjectType.TableType ? "table type" : "user-defined data type";
+                var msg  =
+                    $"[{id.Schema}].[{id.Name}] is a {kind}. SQL Server has no ALTER TYPE, " +
+                    "so changing it requires dropping every dependent object, dropping the " +
+                    "type, recreating it, then recreating the dependents. Do this manually " +
+                    "in SSMS or via a schema migration script — Base.It will not overwrite " +
+                    "it automatically.";
+                _logger.Log($"Sync {id} {sourceEnv}->{targetEnv} refused: {kind} already exists on target");
+                return new SyncResult(SyncStatus.Failed, msg, TargetBackupPath: targetBackup);
+            }
+
             // ─── Table + target-exists: ALTER path ────────────────────────
             //
             // Branches off the regular sync pipeline before script rewriting.
