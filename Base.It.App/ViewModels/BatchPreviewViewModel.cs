@@ -60,6 +60,24 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
     [ObservableProperty] private string _loadError = "";
 
     /// <summary>
+    /// When true the diff ignores spaces and tabs — lines that differ only in
+    /// indentation / spacing show as in-sync. Toggling re-aligns the already
+    /// loaded definitions (no refetch). Bound to the "Ignore spaces &amp; tabs"
+    /// checkbox in the preview.
+    /// </summary>
+    [ObservableProperty] private bool _ignoreWhitespace;
+
+    /// <summary>Formatted definitions captured at load, so the whitespace
+    /// toggle can re-align without hitting the database again.</summary>
+    private List<(string Label, string? Color, string Definition)>? _loadedDefs;
+
+    /// <summary>Endpoint-failure text to re-append to LoadError on every
+    /// rebuild (fetch failures survive a whitespace-toggle re-align).</summary>
+    private string _fetchFailureBlock = "";
+
+    partial void OnIgnoreWhitespaceChanged(bool value) => BuildPanes();
+
+    /// <summary>
     /// Line indices (0-based, in the first pane's Lines list) where a
     /// change starts. Populated by <see cref="LoadAsync"/> /
     /// <see cref="ForLiteralPair"/> after alignment runs. Empty when the
@@ -225,42 +243,76 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
         // endpoint" errors (we have no endpoints to query in this mode).
         vm._skipFetchOnLoad = true;
 
-        // Pair-aware aligner produces per-line char-diff segments so
-        // the renderer can highlight only the actual substring change
-        // instead of repainting the whole line on a whitespace edit.
-        // Two-pane case is the common one (sync screen, snapshot diff,
-        // single-target preview); larger fan-outs use the legacy N-way
-        // path below in LoadAsync.
-        //
-        // Same safety net as LoadAsync: any bug inside the char-
-        // refinement falls back to line-level Align rather than
-        // showing the user an empty / broken pane.
-        try
+        vm._loadedDefs = new()
         {
-            var (leftLines, rightLines) = Base.It.Core.Diff.LineAligner.AlignPair(leftDefinition, rightDefinition);
-            vm.Panes.Add(new EnvPane(leftLabel,  leftColor,  leftDefinition,  leftLines));
-            vm.Panes.Add(new EnvPane(rightLabel, rightColor, rightDefinition, rightLines));
-        }
-        catch (Exception ex)
+            (leftLabel,  leftColor,  leftDefinition),
+            (rightLabel, rightColor, rightDefinition),
+        };
+        vm.BuildPanes();
+        return vm;
+    }
+
+    /// <summary>
+    /// (Re)build the panes from <see cref="_loadedDefs"/> honouring
+    /// <see cref="IgnoreWhitespace"/>. Called after a load and again whenever
+    /// the whitespace toggle flips — no refetch needed. Two definitions use
+    /// the pair-aware char-diff aligner; three or more fall back to N-way
+    /// Align. A failure in the char-refinement drops to line-level Align so
+    /// the panes still render.
+    /// </summary>
+    private void BuildPanes()
+    {
+        Panes.Clear();
+        LoadError = "";
+
+        var defs = _loadedDefs;
+        if (defs is { Count: > 0 })
         {
-            vm.Panes.Clear();
-            var leftLines  = Base.It.Core.Diff.LineAligner.Align(leftDefinition,  new[] { rightDefinition });
-            var rightLines = Base.It.Core.Diff.LineAligner.Align(rightDefinition, new[] { leftDefinition  });
-            vm.Panes.Add(new EnvPane(leftLabel,  leftColor,  leftDefinition,  leftLines));
-            vm.Panes.Add(new EnvPane(rightLabel, rightColor, rightDefinition, rightLines));
-            var firstFrame = ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim() ?? "";
-            vm.LoadError = $"Char-level diff fell back to line-level — {ex.GetType().Name}: {ex.Message}\n{firstFrame}";
+            try
+            {
+                if (defs.Count == 2)
+                {
+                    var (aLines, bLines) = LineAligner.AlignPair(defs[0].Definition, defs[1].Definition, IgnoreWhitespace);
+                    Panes.Add(new EnvPane(defs[0].Label, defs[0].Color, defs[0].Definition, aLines));
+                    Panes.Add(new EnvPane(defs[1].Label, defs[1].Color, defs[1].Definition, bLines));
+                }
+                else
+                {
+                    var all = defs.Select(d => d.Definition).ToList();
+                    foreach (var d in defs)
+                    {
+                        var peers = all.Where(x => !ReferenceEquals(x, d.Definition));
+                        Panes.Add(new EnvPane(d.Label, d.Color, d.Definition,
+                            LineAligner.Align(d.Definition, peers, IgnoreWhitespace)));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Panes.Clear();
+                var all = defs.Select(d => d.Definition).ToList();
+                foreach (var d in defs)
+                {
+                    var peers = all.Where(x => !ReferenceEquals(x, d.Definition));
+                    Panes.Add(new EnvPane(d.Label, d.Color, d.Definition,
+                        LineAligner.Align(d.Definition, peers, IgnoreWhitespace)));
+                }
+                var firstFrame = ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim() ?? "";
+                LoadError = $"Char-level diff fell back to line-level — {ex.GetType().Name}: {ex.Message}\n{firstFrame}";
+            }
         }
 
-        var changes = vm.Panes.FirstOrDefault()?.Lines
-            .Count(l => l.State == Base.It.Core.Diff.LineState.Different) ?? 0;
-        vm.Status = changes == 0
+        if (!string.IsNullOrEmpty(_fetchFailureBlock))
+            LoadError = string.IsNullOrEmpty(LoadError)
+                ? _fetchFailureBlock
+                : LoadError + "\n\n" + _fetchFailureBlock;
+
+        var changes = Panes.FirstOrDefault()?.Lines
+            .Count(l => l.State == LineState.Different) ?? 0;
+        Status = changes == 0
             ? "No changes."
-            : changes == 1
-                ? "1 change"
-                : $"{changes} changes";
-        vm.RebuildChangeIndex();
-        return vm;
+            : changes == 1 ? "1 change" : $"{changes} changes";
+        RebuildChangeIndex();
     }
 
     /// <summary>
@@ -340,94 +392,24 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
             // so the highlight reflects real changes, not cosmetic whitespace /
             // casing / line-break differences. Best-effort: anything ScriptDom
             // can't parse is echoed back unchanged.
-            withContent = withContent
-                .Select(x => (x.Label, x.Color,
-                              Definition: (string?)Base.It.Core.Parsing.SqlFormatter.Format(x.Definition),
-                              x.Error))
+            _loadedDefs = withContent
+                .Select(x => (x.Label, x.Color, Base.It.Core.Parsing.SqlFormatter.Format(x.Definition)))
                 .ToList();
 
-            // Two-pane case → pair-aware aligner so the renderer paints
-            // only the changed substring (whitespace edits no longer
-            // blanket a whole line). Three or more panes fall back to
-            // the legacy N-way Align because pairwise char-diff against
-            // multiple peers would produce conflicting segments.
-            //
-            // The whole alignment block is wrapped because the char-
-            // refinement code is new and ANY arithmetic / index bug in
-            // it would otherwise nuke the entire preview. On failure we
-            // fall back to the legacy line-only Align — content still
-            // appears, just without per-character highlighting — and
-            // surface the exception type + first stack frame in
-            // LoadError so the bug is debuggable from the screen.
-            try
-            {
-                if (withContent.Count == 2)
-                {
-                    var a = withContent[0];
-                    var b = withContent[1];
-                    var (aLines, bLines) = LineAligner.AlignPair(a.Definition!, b.Definition!);
-                    Panes.Add(new EnvPane(a.Label, a.Color, a.Definition!, aLines));
-                    Panes.Add(new EnvPane(b.Label, b.Color, b.Definition!, bLines));
-                }
-                else
-                {
-                    var allDefs = withContent.Select(x => x.Definition!).ToList();
-                    foreach (var (label, color, def, _) in withContent)
-                    {
-                        var peers = allDefs.Where(d => !ReferenceEquals(d, def));
-                        var lines = LineAligner.Align(def!, peers);
-                        Panes.Add(new EnvPane(label, color, def!, lines));
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Panes.Clear();
-                var allDefs = withContent.Select(x => x.Definition!).ToList();
-                foreach (var (label, color, def, _) in withContent)
-                {
-                    var peers = allDefs.Where(d => !ReferenceEquals(d, def));
-                    var lines = LineAligner.Align(def!, peers);
-                    Panes.Add(new EnvPane(label, color, def!, lines));
-                }
-                var firstFrame = ex.StackTrace?.Split('\n').FirstOrDefault()?.Trim() ?? "";
-                LoadError = $"Char-level diff fell back to line-level — {ex.GetType().Name}: {ex.Message}\n{firstFrame}";
-            }
-
-            // Surface failures in a neutral block above the panes so the
-            // user sees "PROD/Customers — connection refused" rather than
-            // silently missing pane.
-            //
-            // IMPORTANT: only ADD to LoadError, never CLEAR it. The inner
-            // try/catch above may have set LoadError to "Char-level diff
-            // fell back to ..." — if no fetch failures, we'd otherwise
-            // overwrite that message with "" and the user would have no
-            // way to see the exception that broke the diff. The previous
-            // version of this line was an unconditional assignment that
-            // hid the safety-net diagnostic entirely.
+            // Surface fetch failures in a neutral block above the panes so the
+            // user sees "PROD/Customers — connection refused" rather than a
+            // silently missing pane. Stored so it survives whitespace re-aligns.
             var failures = collected
                 .Where(x => string.IsNullOrWhiteSpace(x.Definition))
                 .Select(x => $"  • {x.Label}: {x.Error ?? "no definition"}")
                 .ToList();
-            if (failures.Count > 0)
-            {
-                var failBlock = "Some endpoints couldn't be loaded:\n" + string.Join('\n', failures);
-                LoadError = string.IsNullOrEmpty(LoadError)
-                    ? failBlock
-                    : LoadError + "\n\n" + failBlock;
-            }
+            _fetchFailureBlock = failures.Count > 0
+                ? "Some endpoints couldn't be loaded:\n" + string.Join('\n', failures)
+                : "";
 
-            // The first pane is the anchor for the change count — same
-            // value the inline change-nav arrows use. Per-pane "lines
-            // changed" counts already show in each pane's header.
-            var changes = Panes.FirstOrDefault()?.Lines
-                .Count(l => l.State == LineState.Different) ?? 0;
-            Status = changes == 0
-                ? "No changes."
-                : changes == 1
-                    ? "1 change"
-                    : $"{changes} changes";
-            RebuildChangeIndex();
+            // Pair-aware char-diff for two panes, N-way Align for more —
+            // honouring the whitespace toggle. (See BuildPanes.)
+            BuildPanes();
         }
         catch (Exception ex)
         {
