@@ -419,6 +419,9 @@ public sealed partial class WatchViewModel : ObservableObject, ICsvExportable
         Sections.Add(new("Views",
             new[] { SqlObjectType.View },
             t => t == SqlObjectType.View));
+        Sections.Add(new("Types",
+            new[] { SqlObjectType.TableType, SqlObjectType.UserDefinedDataType },
+            t => t is SqlObjectType.TableType or SqlObjectType.UserDefinedDataType));
 
         // Live-apply: when the user flips a section's toggle, persist the
         // new object-types list back to the group so the next tick scans

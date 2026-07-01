@@ -203,16 +203,115 @@ ORDER BY c.column_id";
 
     /// <summary>
     /// Lists every user-authored object whose type is one we can sync:
-    /// procedures, functions (scalar / inline / tvf), views, tables, and
-    /// triggers. Filtered to <c>is_ms_shipped = 0</c> so system objects
-    /// don't pollute the result.
+    /// procedures, functions (scalar / inline / tvf), views, tables,
+    /// triggers, and user-defined types (both table types via
+    /// <c>sys.objects.type = 'TT'</c> and alias types via
+    /// <c>sys.types.is_user_defined = 1 AND is_table_type = 0</c>).
+    /// Alias types aren't in <c>sys.objects</c>, so we UNION with
+    /// <c>sys.types</c> under a synthetic 'UDDT' code.
+    /// Filtered to <c>is_ms_shipped = 0</c> so system objects don't pollute.
     /// </summary>
     private const string ListAllQuery = NonBlockingPreamble + @"
 SELECT SCHEMA_NAME(o.schema_id) AS schema_name, o.name, o.type
 FROM sys.objects o
 WHERE o.is_ms_shipped = 0
-  AND o.type IN ('U','V','P','FN','TF','IF','TR')
-ORDER BY schema_name, o.name";
+  AND o.type IN ('U','V','P','FN','TF','IF','TR','TT')
+UNION ALL
+SELECT SCHEMA_NAME(t.schema_id) AS schema_name, t.name, 'UDDT' AS type
+FROM sys.types t
+WHERE t.is_user_defined = 1
+  AND t.is_table_type   = 0
+ORDER BY schema_name, name";
+
+    /// <summary>
+    /// Fallback probe for user-defined data types (alias types). Not in
+    /// <c>sys.objects</c>; needs a separate read against <c>sys.types</c>.
+    /// Returns 1 when the (@schema, @name) pair resolves to a UDDT.
+    /// </summary>
+    private const string UserDefinedDataTypeExistsQuery = NonBlockingPreamble + @"
+SELECT TOP 1 1
+FROM sys.types t
+WHERE t.name = @name
+  AND SCHEMA_NAME(t.schema_id) = @schema
+  AND t.is_user_defined = 1
+  AND t.is_table_type   = 0";
+
+    /// <summary>Resolves a table type's <c>object_id</c> so we can reuse the column / constraint queries.</summary>
+    private const string TableTypeObjectIdQuery = NonBlockingPreamble + @"
+SELECT tt.type_table_object_id
+FROM sys.table_types tt
+WHERE tt.name = @name
+  AND SCHEMA_NAME(tt.schema_id) = @schema";
+
+    /// <summary>Reads the base type + length/precision/scale/nullability for a UDDT.</summary>
+    private const string UserDefinedDataTypeQuery = NonBlockingPreamble + @"
+SELECT
+    base_ty.name        AS base_type_name,
+    t.max_length        AS max_length,
+    t.precision         AS precision,
+    t.scale             AS scale,
+    t.is_nullable       AS is_nullable
+FROM sys.types t
+INNER JOIN sys.types base_ty
+       ON base_ty.user_type_id = t.system_type_id
+      AND base_ty.is_user_defined = 0
+WHERE t.name = @name
+  AND SCHEMA_NAME(t.schema_id) = @schema
+  AND t.is_user_defined = 1
+  AND t.is_table_type   = 0";
+
+    /// <summary>Columns of a table type. Same shape as <see cref="TableColumnsQuery"/> but keyed by <c>object_id</c>.</summary>
+    private const string TableTypeColumnsQuery = NonBlockingPreamble + @"
+SELECT
+    c.column_id,
+    c.name,
+    ty.name                          AS type_name,
+    c.max_length,
+    c.precision,
+    c.scale,
+    c.is_nullable,
+    c.is_identity,
+    CAST(ic.seed_value      AS BIGINT) AS identity_seed,
+    CAST(ic.increment_value AS BIGINT) AS identity_increment,
+    ic.is_not_for_replication         AS identity_not_for_replication,
+    cc.definition                     AS computed_definition,
+    cc.is_persisted                   AS computed_is_persisted,
+    dc.name                           AS default_name,
+    dc.definition                     AS default_definition,
+    c.collation_name,
+    c.is_rowguidcol
+FROM sys.columns c
+INNER JOIN sys.types ty ON c.user_type_id = ty.user_type_id
+LEFT JOIN sys.identity_columns   ic ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+LEFT JOIN sys.computed_columns   cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
+LEFT JOIN sys.default_constraints dc ON dc.parent_object_id = c.object_id AND dc.parent_column_id = c.column_id
+WHERE c.object_id = @object_id
+ORDER BY c.column_id";
+
+    private const string TableTypeKeyConstraintsQuery = NonBlockingPreamble + @"
+SELECT
+    kc.name               AS constraint_name,
+    kc.type               AS constraint_type,
+    i.type_desc           AS index_type,
+    i.fill_factor         AS fill_factor,
+    i.is_padded           AS is_padded,
+    ds.name               AS data_space_name,
+    ic.key_ordinal,
+    col.name              AS column_name,
+    ic.is_descending_key
+FROM sys.key_constraints kc
+INNER JOIN sys.indexes       i   ON i.object_id = kc.parent_object_id AND i.index_id = kc.unique_index_id
+INNER JOIN sys.data_spaces   ds  ON ds.data_space_id = i.data_space_id
+INNER JOIN sys.index_columns ic  ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+INNER JOIN sys.columns       col ON col.object_id = ic.object_id AND col.column_id = ic.column_id
+WHERE kc.parent_object_id = @object_id
+ORDER BY kc.name, ic.key_ordinal";
+
+    private const string TableTypeCheckConstraintsQuery = NonBlockingPreamble + @"
+SELECT cc.name, cc.definition, cc.is_not_trusted, cc.is_not_for_replication
+FROM sys.check_constraints cc
+WHERE cc.parent_object_id = @object_id
+ORDER BY cc.name";
 
     public async Task<SqlObjectType> GetObjectTypeAsync(
         string connectionString, ObjectIdentifier id, CancellationToken ct = default)
@@ -220,14 +319,30 @@ ORDER BY schema_name, o.name";
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
 
-        await using var cmd = new SqlCommand(TypeQuery, conn);
-        cmd.Parameters.Add("@name", System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
-        cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
+        // Probe sys.objects first — covers U/V/P/FN/IF/TF/TR/TT.
+        await using (var cmd = new SqlCommand(TypeQuery, conn))
+        {
+            cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
+            cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
 
-        var result = await cmd.ExecuteScalarAsync(ct) as string;
-        if (string.IsNullOrWhiteSpace(result)) return SqlObjectType.Unknown;
+            var raw = await cmd.ExecuteScalarAsync(ct) as string;
+            var mapped = MapSysObjectsTypeCode(raw);
+            if (mapped != SqlObjectType.Unknown) return mapped;
+        }
 
-        return result.Trim().ToUpperInvariant() switch
+        // Alias types (CREATE TYPE ... FROM base) live in sys.types, not
+        // sys.objects — fall back to a targeted probe there before giving up.
+        await using (var uddtCmd = new SqlCommand(UserDefinedDataTypeExistsQuery, conn))
+        {
+            uddtCmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
+            uddtCmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
+            var exists = await uddtCmd.ExecuteScalarAsync(ct);
+            return exists is not null ? SqlObjectType.UserDefinedDataType : SqlObjectType.Unknown;
+        }
+    }
+
+    private static SqlObjectType MapSysObjectsTypeCode(string? code) =>
+        string.IsNullOrWhiteSpace(code) ? SqlObjectType.Unknown : code.Trim().ToUpperInvariant() switch
         {
             "U"  => SqlObjectType.Table,
             "V"  => SqlObjectType.View,
@@ -236,29 +351,175 @@ ORDER BY schema_name, o.name";
             "IF" => SqlObjectType.InlineTableFunction,
             "TF" => SqlObjectType.TableValuedFunction,
             "TR" => SqlObjectType.Trigger,
+            "TT" => SqlObjectType.TableType,
             _    => SqlObjectType.Unknown
         };
-    }
 
     public async Task<SqlObject?> GetObjectAsync(
         string connectionString, ObjectIdentifier id, CancellationToken ct = default)
     {
-        // Tables now route through the constraint-aware DACPAC path so
-        // preview / diff / sync / drift all see the full table definition
-        // (columns + identity + defaults + computed + PK / UQ / CHECK /
-        // FK / indexes / triggers). The old column-only path was producing
-        // round-tripped tables that silently dropped every constraint.
-        // ScriptTableSimpleAsync is kept around behind a separate entry
-        // point for callers that explicitly want the lightweight read.
+        // Tables + table types route through the constraint-aware catalog
+        // path so preview / diff / sync / drift see the full definition.
+        // Alias types (UDDTs) have their own render path — different DDL
+        // shape entirely (CREATE TYPE ... FROM base). Everything else is
+        // a module (P / V / FN / IF / TF / TR) and comes from sys.sql_modules.
         var type = await GetObjectTypeAsync(connectionString, id, ct);
         if (type == SqlObjectType.Unknown) return null;
 
-        string definition = type == SqlObjectType.Table
-            ? await ScriptTableForDacpacAsync(connectionString, id, ct)
-            : await GetModuleDefinitionAsync(connectionString, id, ct);
+        string definition = type switch
+        {
+            SqlObjectType.Table               => await ScriptTableForDacpacAsync(connectionString, id, ct),
+            SqlObjectType.TableType           => await ScriptTableTypeAsync(connectionString, id, ct),
+            SqlObjectType.UserDefinedDataType => await ScriptUserDefinedDataTypeAsync(connectionString, id, ct),
+            _                                 => await GetModuleDefinitionAsync(connectionString, id, ct)
+        };
 
         if (string.IsNullOrWhiteSpace(definition)) return null;
         return new SqlObject(id, type, definition, DefinitionHasher.Hash(definition));
+    }
+
+    // ─── User-defined types (TT + alias) ───────────────────────────────────
+
+    /// <summary>
+    /// Renders a table type (<c>CREATE TYPE [x] AS TABLE (...)</c>). Reuses
+    /// <see cref="TableScriptRenderer"/> so column, PK/UQ, and CHECK output
+    /// is byte-identical to how a real table would be scripted.
+    /// </summary>
+    private async Task<string> ScriptTableTypeAsync(
+        string connectionString, ObjectIdentifier id, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        int? objectId;
+        await using (var cmd = new SqlCommand(TableTypeObjectIdQuery, conn))
+        {
+            cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
+            cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
+            objectId = (int?)await cmd.ExecuteScalarAsync(ct);
+        }
+        if (objectId is null) return string.Empty;
+
+        var dbCollation      = await LoadDatabaseCollationAsync(conn, ct);
+        var columns          = await LoadTableTypeColumnsAsync(conn, objectId.Value, ct);
+        if (columns.Count == 0) return string.Empty;
+        var keyConstraints   = await LoadTableTypeKeyConstraintsAsync(conn, objectId.Value, ct);
+        var checkConstraints = await LoadTableTypeCheckConstraintsAsync(conn, objectId.Value, ct);
+
+        return TableScriptRenderer.RenderTableType(
+            schema:           id.Schema,
+            name:             id.Name,
+            columns:          columns,
+            keyConstraints:   keyConstraints,
+            checkConstraints: checkConstraints,
+            dbCollation:      dbCollation);
+    }
+
+    /// <summary>
+    /// Renders an alias / user-defined data type
+    /// (<c>CREATE TYPE [x] FROM basetype(len) [NOT] NULL</c>). One row of
+    /// catalog metadata drives everything — no columns, no constraints.
+    /// </summary>
+    private async Task<string> ScriptUserDefinedDataTypeAsync(
+        string connectionString, ObjectIdentifier id, CancellationToken ct)
+    {
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = new SqlCommand(UserDefinedDataTypeQuery, conn);
+        cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
+        cmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return string.Empty;
+
+        return TableScriptRenderer.RenderUserDefinedDataType(
+            schema:       id.Schema,
+            name:         id.Name,
+            baseTypeName: reader.GetString(reader.GetOrdinal("base_type_name")),
+            maxLength:    reader.GetInt16(reader.GetOrdinal("max_length")),
+            precision:    reader.GetByte(reader.GetOrdinal("precision")),
+            scale:        reader.GetByte(reader.GetOrdinal("scale")),
+            isNullable:   reader.GetBoolean(reader.GetOrdinal("is_nullable")));
+    }
+
+    private static async Task<List<TableScriptRenderer.ColumnInfo>> LoadTableTypeColumnsAsync(
+        SqlConnection conn, int objectId, CancellationToken ct)
+    {
+        var list = new List<TableScriptRenderer.ColumnInfo>();
+        await using var cmd = new SqlCommand(TableTypeColumnsQuery, conn);
+        cmd.Parameters.Add("@object_id", System.Data.SqlDbType.Int).Value = objectId;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            list.Add(new TableScriptRenderer.ColumnInfo(
+                Name:                      reader.GetString(reader.GetOrdinal("name")),
+                TypeName:                  reader.GetString(reader.GetOrdinal("type_name")),
+                MaxLength:                 reader.GetInt16 (reader.GetOrdinal("max_length")),
+                Precision:                 reader.GetByte  (reader.GetOrdinal("precision")),
+                Scale:                     reader.GetByte  (reader.GetOrdinal("scale")),
+                IsNullable:                reader.GetBoolean(reader.GetOrdinal("is_nullable")),
+                IsIdentity:                reader.GetBoolean(reader.GetOrdinal("is_identity")),
+                IdentitySeed:              SafeLong(reader, "identity_seed"),
+                IdentityIncrement:         SafeLong(reader, "identity_increment"),
+                IdentityNotForReplication: SafeBool(reader, "identity_not_for_replication") ?? false,
+                ComputedDefinition:        SafeString(reader, "computed_definition"),
+                ComputedIsPersisted:       SafeBool(reader, "computed_is_persisted"),
+                DefaultName:               SafeString(reader, "default_name"),
+                DefaultDefinition:         SafeString(reader, "default_definition"),
+                CollationName:             SafeString(reader, "collation_name"),
+                IsRowGuidCol:              reader.GetBoolean(reader.GetOrdinal("is_rowguidcol"))));
+        }
+        return list;
+    }
+
+    private static async Task<List<TableScriptRenderer.KeyConstraintGroup>> LoadTableTypeKeyConstraintsAsync(
+        SqlConnection conn, int objectId, CancellationToken ct)
+    {
+        var rows = new List<(string Name, string Type, string IndexType, byte FillFactor,
+                             bool IsPadded, string DataSpaceName, string Column, bool Desc)>();
+        await using var cmd = new SqlCommand(TableTypeKeyConstraintsQuery, conn);
+        cmd.Parameters.Add("@object_id", System.Data.SqlDbType.Int).Value = objectId;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            rows.Add((
+                reader.GetString (reader.GetOrdinal("constraint_name")),
+                reader.GetString (reader.GetOrdinal("constraint_type")).Trim(),
+                reader.GetString (reader.GetOrdinal("index_type")),
+                reader.GetByte   (reader.GetOrdinal("fill_factor")),
+                reader.GetBoolean(reader.GetOrdinal("is_padded")),
+                reader.GetString (reader.GetOrdinal("data_space_name")),
+                reader.GetString (reader.GetOrdinal("column_name")),
+                reader.GetBoolean(reader.GetOrdinal("is_descending_key"))));
+        }
+        return rows.GroupBy(r => r.Name)
+                   .Select(g => new TableScriptRenderer.KeyConstraintGroup(
+                       Name:          g.Key,
+                       Type:          g.First().Type,
+                       IndexType:     g.First().IndexType,
+                       FillFactor:    g.First().FillFactor,
+                       IsPadded:      g.First().IsPadded,
+                       DataSpaceName: g.First().DataSpaceName,
+                       Columns:       g.Select(r => (r.Column, r.Desc)).ToList()))
+                   .ToList();
+    }
+
+    private static async Task<List<TableScriptRenderer.CheckConstraintInfo>> LoadTableTypeCheckConstraintsAsync(
+        SqlConnection conn, int objectId, CancellationToken ct)
+    {
+        var list = new List<TableScriptRenderer.CheckConstraintInfo>();
+        await using var cmd = new SqlCommand(TableTypeCheckConstraintsQuery, conn);
+        cmd.Parameters.Add("@object_id", System.Data.SqlDbType.Int).Value = objectId;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            list.Add(new TableScriptRenderer.CheckConstraintInfo(
+                Name:                reader.GetString(0),
+                Definition:          reader.GetString(1),
+                IsNotTrusted:        reader.GetBoolean(2),
+                IsNotForReplication: reader.GetBoolean(3)));
+        }
+        return list;
     }
 
     /// <summary>
@@ -347,14 +608,16 @@ WHERE tr.name = @name
             var type   = reader.GetString(2).Trim().ToUpperInvariant();
             var sqlType = type switch
             {
-                "U"  => SqlObjectType.Table,
-                "V"  => SqlObjectType.View,
-                "P"  => SqlObjectType.StoredProcedure,
-                "FN" => SqlObjectType.ScalarFunction,
-                "IF" => SqlObjectType.InlineTableFunction,
-                "TF" => SqlObjectType.TableValuedFunction,
-                "TR" => SqlObjectType.Trigger,
-                _    => SqlObjectType.Unknown
+                "U"    => SqlObjectType.Table,
+                "V"    => SqlObjectType.View,
+                "P"    => SqlObjectType.StoredProcedure,
+                "FN"   => SqlObjectType.ScalarFunction,
+                "IF"   => SqlObjectType.InlineTableFunction,
+                "TF"   => SqlObjectType.TableValuedFunction,
+                "TR"   => SqlObjectType.Trigger,
+                "TT"   => SqlObjectType.TableType,
+                "UDDT" => SqlObjectType.UserDefinedDataType,
+                _      => SqlObjectType.Unknown
             };
             if (sqlType == SqlObjectType.Unknown) continue;
             results.Add(new SqlObjectRef(new ObjectIdentifier(schema, name), sqlType));
