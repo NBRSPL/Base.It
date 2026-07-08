@@ -332,7 +332,12 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
 
             if (withContent.Count == 0)
             {
-                Status = $"'{_objectName}' not found in any endpoint.";
+                // Surface per-endpoint reason instead of a blanket "not found."
+                // The old message hid whether one endpoint had a real error
+                // and another was just missing the object — you couldn't tell.
+                var lines = collected
+                    .Select(x => $"  • {x.Label}: {(string.IsNullOrWhiteSpace(x.Error) ? "not found" : x.Error)}");
+                Status = $"'{_objectName}' not found in any endpoint:\n" + string.Join("\n", lines);
                 return;
             }
 

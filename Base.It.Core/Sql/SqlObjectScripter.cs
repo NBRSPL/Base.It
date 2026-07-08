@@ -202,20 +202,27 @@ WHERE t.name = @name
 ORDER BY c.column_id";
 
     /// <summary>
-    /// Lists every user-authored object whose type is one we can sync:
-    /// procedures, functions (scalar / inline / tvf), views, tables,
-    /// triggers, and user-defined types (both table types via
-    /// <c>sys.objects.type = 'TT'</c> and alias types via
-    /// <c>sys.types.is_user_defined = 1 AND is_table_type = 0</c>).
-    /// Alias types aren't in <c>sys.objects</c>, so we UNION with
-    /// <c>sys.types</c> under a synthetic 'UDDT' code.
-    /// Filtered to <c>is_ms_shipped = 0</c> so system objects don't pollute.
+    /// Every user-authored object in the database. Three sources UNIONed:
+    /// <list type="number">
+    ///   <item>sys.objects (excluding TT — see next entry) for U/V/P/FN/IF/TF/TR</item>
+    ///   <item>sys.table_types for TT — sys.objects stores TT rows under
+    ///         system-generated internal names, so we can't rely on
+    ///         sys.objects.name for user-facing lookups</item>
+    ///   <item>sys.types for alias UDDTs (which aren't in sys.objects at all)</item>
+    /// </list>
+    /// Anything the sync path doesn't know how to render surfaces as
+    /// <c>SqlObjectType.Unknown</c> and the engine flags it for manual
+    /// review rather than silently ignoring it.
     /// </summary>
     private const string ListAllQuery = NonBlockingPreamble + @"
 SELECT SCHEMA_NAME(o.schema_id) AS schema_name, o.name, o.type
 FROM sys.objects o
 WHERE o.is_ms_shipped = 0
-  AND o.type IN ('U','V','P','FN','TF','IF','TR','TT')
+  AND o.type <> 'TT'
+UNION ALL
+SELECT SCHEMA_NAME(tt.schema_id) AS schema_name, tt.name, 'TT' AS type
+FROM sys.table_types tt
+WHERE tt.is_user_defined = 1
 UNION ALL
 SELECT SCHEMA_NAME(t.schema_id) AS schema_name, t.name, 'UDDT' AS type
 FROM sys.types t
@@ -235,6 +242,21 @@ WHERE t.name = @name
   AND SCHEMA_NAME(t.schema_id) = @schema
   AND t.is_user_defined = 1
   AND t.is_table_type   = 0";
+
+    /// <summary>
+    /// Fallback probe for table types. Every TT has a row in
+    /// <c>sys.objects</c> too, but SQL Server names it with an internal
+    /// system-generated string there — <c>sys.table_types.name</c> is
+    /// where the user-facing name lives. Without this probe, a plain
+    /// <c>WHERE name = @userName</c> against sys.objects misses TTs
+    /// entirely.
+    /// </summary>
+    private const string TableTypeExistsQuery = NonBlockingPreamble + @"
+SELECT TOP 1 1
+FROM sys.table_types tt
+WHERE tt.name = @name
+  AND SCHEMA_NAME(tt.schema_id) = @schema
+  AND tt.is_user_defined = 1";
 
     /// <summary>Resolves a table type's <c>object_id</c> so we can reuse the column / constraint queries.</summary>
     private const string TableTypeObjectIdQuery = NonBlockingPreamble + @"
@@ -319,7 +341,11 @@ ORDER BY cc.name";
         await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync(ct);
 
-        // Probe sys.objects first — covers U/V/P/FN/IF/TF/TR/TT.
+        // Probe sys.objects first — covers U/V/P/FN/IF/TF/TR by user-facing name.
+        // Note: TT rows exist in sys.objects but with SYSTEM-GENERATED names,
+        // not the user-facing name — so this probe won't catch table types
+        // even though they're technically here. That's what the TT branch below
+        // is for.
         await using (var cmd = new SqlCommand(TypeQuery, conn))
         {
             cmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
@@ -328,6 +354,15 @@ ORDER BY cc.name";
             var raw = await cmd.ExecuteScalarAsync(ct) as string;
             var mapped = MapSysObjectsTypeCode(raw);
             if (mapped != SqlObjectType.Unknown) return mapped;
+        }
+
+        // Table types — user-facing name lives in sys.table_types.
+        await using (var ttCmd = new SqlCommand(TableTypeExistsQuery, conn))
+        {
+            ttCmd.Parameters.Add("@name",   System.Data.SqlDbType.NVarChar, 128).Value = id.Name;
+            ttCmd.Parameters.Add("@schema", System.Data.SqlDbType.NVarChar, 128).Value = id.Schema;
+            var exists = await ttCmd.ExecuteScalarAsync(ct);
+            if (exists is not null) return SqlObjectType.TableType;
         }
 
         // Alias types (CREATE TYPE ... FROM base) live in sys.types, not
@@ -590,6 +625,33 @@ WHERE tr.name = @name
         return await cmd.ExecuteScalarAsync(ct) as string ?? string.Empty;
     }
 
+    /// <summary>
+    /// Same as <see cref="ListAllQuery"/> but filters sys.objects by
+    /// <c>modify_date &gt; @sinceUtc</c>. Alias types (from sys.types)
+    /// have no modify_date column, so they're always included — the
+    /// caller can decide whether to keep them by inspecting the type.
+    /// </summary>
+    private const string ListChangedSinceQuery = NonBlockingPreamble + @"
+SELECT SCHEMA_NAME(o.schema_id) AS schema_name, o.name, o.type
+FROM sys.objects o
+WHERE o.is_ms_shipped = 0
+  AND o.type <> 'TT'
+  AND o.modify_date > @since_utc
+UNION ALL
+-- TT names live in sys.table_types; join sys.objects on the underlying
+-- schema row to get modify_date so the time filter still applies.
+SELECT SCHEMA_NAME(tt.schema_id) AS schema_name, tt.name, 'TT' AS type
+FROM sys.table_types tt
+INNER JOIN sys.objects o ON o.object_id = tt.type_table_object_id
+WHERE tt.is_user_defined = 1
+  AND o.modify_date > @since_utc
+UNION ALL
+SELECT SCHEMA_NAME(t.schema_id) AS schema_name, t.name, 'UDDT' AS type
+FROM sys.types t
+WHERE t.is_user_defined = 1
+  AND t.is_table_type   = 0
+ORDER BY schema_name, name";
+
     public async Task<IReadOnlyList<SqlObjectRef>> ListAllAsync(
         string connectionString, CancellationToken ct = default)
     {
@@ -600,6 +662,104 @@ WHERE tr.name = @name
         await using var cmd = new SqlCommand(ListAllQuery, conn) { CommandTimeout = 30 };
 
         var results = new List<SqlObjectRef>(capacity: 256);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var schema = reader.GetString(0);
+            var name   = reader.GetString(1);
+            var type   = reader.GetString(2).Trim().ToUpperInvariant();
+            var sqlType = type switch
+            {
+                "U"    => SqlObjectType.Table,
+                "V"    => SqlObjectType.View,
+                "P"    => SqlObjectType.StoredProcedure,
+                "FN"   => SqlObjectType.ScalarFunction,
+                "IF"   => SqlObjectType.InlineTableFunction,
+                "TF"   => SqlObjectType.TableValuedFunction,
+                "TR"   => SqlObjectType.Trigger,
+                "TT"   => SqlObjectType.TableType,
+                "UDDT" => SqlObjectType.UserDefinedDataType,
+                _      => SqlObjectType.Unknown
+            };
+            if (sqlType == SqlObjectType.Unknown) continue;
+            results.Add(new SqlObjectRef(new ObjectIdentifier(schema, name), sqlType));
+        }
+        return results;
+    }
+
+    /// <summary>
+    /// One-shot metadata dump: every user object's identity, type, and
+    /// modify_date. Feeds the prod-sync engine's skip-if-unchanged
+    /// fast path so per-object definition fetches are only done when
+    /// something has actually moved.
+    /// </summary>
+    private const string ListAllWithModifyDatesQuery = NonBlockingPreamble + @"
+SELECT SCHEMA_NAME(o.schema_id) AS schema_name, o.name, o.type, o.modify_date
+FROM sys.objects o
+WHERE o.is_ms_shipped = 0
+  AND o.type <> 'TT'
+UNION ALL
+SELECT SCHEMA_NAME(tt.schema_id) AS schema_name, tt.name, 'TT' AS type, o.modify_date
+FROM sys.table_types tt
+INNER JOIN sys.objects o ON o.object_id = tt.type_table_object_id
+WHERE tt.is_user_defined = 1
+UNION ALL
+SELECT SCHEMA_NAME(t.schema_id) AS schema_name, t.name, 'UDDT' AS type, CAST(NULL AS DATETIME) AS modify_date
+FROM sys.types t
+WHERE t.is_user_defined = 1
+  AND t.is_table_type   = 0
+ORDER BY schema_name, name";
+
+    public async Task<IReadOnlyList<SqlObjectMetadata>> ListAllWithModifyDatesAsync(
+        string connectionString, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return Array.Empty<SqlObjectMetadata>();
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(ListAllWithModifyDatesQuery, conn) { CommandTimeout = 60 };
+
+        var results = new List<SqlObjectMetadata>(capacity: 512);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var schema = reader.GetString(0);
+            var name   = reader.GetString(1);
+            var type   = reader.GetString(2).Trim().ToUpperInvariant();
+            DateTime? modifyDate = reader.IsDBNull(3)
+                ? null
+                : DateTime.SpecifyKind(reader.GetDateTime(3), DateTimeKind.Utc);
+
+            var sqlType = type switch
+            {
+                "U"    => SqlObjectType.Table,
+                "V"    => SqlObjectType.View,
+                "P"    => SqlObjectType.StoredProcedure,
+                "FN"   => SqlObjectType.ScalarFunction,
+                "IF"   => SqlObjectType.InlineTableFunction,
+                "TF"   => SqlObjectType.TableValuedFunction,
+                "TR"   => SqlObjectType.Trigger,
+                "TT"   => SqlObjectType.TableType,
+                "UDDT" => SqlObjectType.UserDefinedDataType,
+                _      => SqlObjectType.Unknown
+            };
+            if (sqlType == SqlObjectType.Unknown) continue;
+            results.Add(new SqlObjectMetadata(new ObjectIdentifier(schema, name), sqlType, modifyDate));
+        }
+        return results;
+    }
+
+    public async Task<IReadOnlyList<SqlObjectRef>> ListChangedSinceAsync(
+        string connectionString, DateTime sinceUtc, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(connectionString)) return Array.Empty<SqlObjectRef>();
+
+        await using var conn = new SqlConnection(connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = new SqlCommand(ListChangedSinceQuery, conn) { CommandTimeout = 30 };
+        cmd.Parameters.Add("@since_utc", System.Data.SqlDbType.DateTime2).Value = sinceUtc;
+
+        var results = new List<SqlObjectRef>(capacity: 64);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         while (await reader.ReadAsync(ct))
         {

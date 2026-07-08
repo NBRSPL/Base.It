@@ -50,6 +50,10 @@ public class DriftDetectorTests
                 .ToList();
             return Task.FromResult<IReadOnlyList<SqlObjectRef>>(refs);
         }
+        public Task<IReadOnlyList<SqlObjectRef>> ListChangedSinceAsync(string conn, DateTime sinceUtc, CancellationToken ct = default)
+            => ListAllAsync(conn, ct);
+        public Task<IReadOnlyList<SqlObjectMetadata>> ListAllWithModifyDatesAsync(string conn, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<SqlObjectMetadata>>(Array.Empty<SqlObjectMetadata>()); // test fake — no modify-date tracking, return everything
         public Task<Base.It.Core.Sql.TableMetadata?> FetchTableMetadataAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
             => Task.FromResult<Base.It.Core.Sql.TableMetadata?>(null);
     }
@@ -186,6 +190,11 @@ public class DriftDetectorTests
         public Task<IReadOnlyList<SqlObjectRef>> ListAllAsync(string conn, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<SqlObjectRef>>(Array.Empty<SqlObjectRef>());
 
+        public Task<IReadOnlyList<SqlObjectRef>> ListChangedSinceAsync(string conn, DateTime sinceUtc, CancellationToken ct = default)
+            => ListAllAsync(conn, ct);
+        public Task<IReadOnlyList<SqlObjectMetadata>> ListAllWithModifyDatesAsync(string conn, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<SqlObjectMetadata>>(Array.Empty<SqlObjectMetadata>());
+
         public Task<Base.It.Core.Sql.TableMetadata?> FetchTableMetadataAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
             => Task.FromResult<Base.It.Core.Sql.TableMetadata?>(null);
     }
@@ -237,6 +246,11 @@ public class DriftDetectorTests
 
         public Task<IReadOnlyList<SqlObjectRef>> ListAllAsync(string conn, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<SqlObjectRef>>(Array.Empty<SqlObjectRef>());
+
+        public Task<IReadOnlyList<SqlObjectRef>> ListChangedSinceAsync(string conn, DateTime sinceUtc, CancellationToken ct = default)
+            => ListAllAsync(conn, ct);
+        public Task<IReadOnlyList<SqlObjectMetadata>> ListAllWithModifyDatesAsync(string conn, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<SqlObjectMetadata>>(Array.Empty<SqlObjectMetadata>());
 
         public Task<Base.It.Core.Sql.TableMetadata?> FetchTableMetadataAsync(string conn, ObjectIdentifier id, CancellationToken ct = default)
             => Task.FromResult<Base.It.Core.Sql.TableMetadata?>(null);
