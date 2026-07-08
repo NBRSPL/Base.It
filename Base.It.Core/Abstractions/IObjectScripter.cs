@@ -57,6 +57,36 @@ public interface IObjectScripter
         CancellationToken ct = default);
 
     /// <summary>
+    /// Same shape as <see cref="ListAllAsync"/> but filtered to objects
+    /// whose <c>sys.objects.modify_date</c> is strictly greater than
+    /// <paramref name="sinceUtc"/>. Mirrors the DBA-style
+    /// "modify_date &gt; DATEADD(DAY,-1,…)" pattern used to email a
+    /// daily changed-objects list — same filter, done at the SQL layer
+    /// so we don't drag every object across the wire on every run.
+    /// User-defined data types (alias types) come from <c>sys.types</c>
+    /// and are included unconditionally; that table has no modify_date.
+    /// </summary>
+    Task<IReadOnlyList<SqlObjectRef>> ListChangedSinceAsync(
+        string connectionString,
+        DateTime sinceUtc,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Enumerate every syncable object with its <c>modify_date</c> from
+    /// <c>sys.objects</c> so callers can decide server-side whether a
+    /// definition needs to be re-fetched at all. One SQL round-trip. The
+    /// prod-sync engine uses this to skip full definition fetches when
+    /// both sides' modify_dates match its cached last-seen values —
+    /// turning a 500-object run from thousands of round-trips into two.
+    /// UDDTs (alias types) live in sys.types and have no modify_date;
+    /// they come back with a null date and the caller treats them as
+    /// "always fetch" (they're cheap to render).
+    /// </summary>
+    Task<IReadOnlyList<SqlObjectMetadata>> ListAllWithModifyDatesAsync(
+        string connectionString,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Fetches the full constraint-aware metadata for one user table —
     /// header, columns, PK/UQ, CHECK, FK, indexes — for diff / ALTER
     /// planning. Returns <c>null</c> when the identifier doesn't resolve
@@ -70,3 +100,13 @@ public interface IObjectScripter
 
 /// <summary>Lightweight (identity + type) pair returned by <see cref="IObjectScripter.ListAllAsync"/>.</summary>
 public sealed record SqlObjectRef(Base.It.Core.Models.ObjectIdentifier Id, Base.It.Core.Models.SqlObjectType Type);
+
+/// <summary>
+/// Identity + type + modify-date snapshot for the skip-if-unchanged
+/// fast path. <see cref="ModifyDateUtc"/> is null when the source
+/// catalog doesn't expose one (currently: alias UDDTs from sys.types).
+/// </summary>
+public sealed record SqlObjectMetadata(
+    Base.It.Core.Models.ObjectIdentifier Id,
+    Base.It.Core.Models.SqlObjectType    Type,
+    DateTime?                            ModifyDateUtc);
