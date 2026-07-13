@@ -44,9 +44,10 @@ public sealed record AlignedPaneLine(
 /// </summary>
 public static class LineAligner
 {
-    public static IReadOnlyList<AlignedPaneLine> Align(string self, IEnumerable<string> others)
+    public static IReadOnlyList<AlignedPaneLine> Align(string self, IEnumerable<string> others, bool ignoreWhitespace = false)
     {
         var selfLines = Split(self);
+        var selfKeys  = Keys(selfLines, ignoreWhitespace);
         var result = new AlignedPaneLine[selfLines.Length];
 
         // Start optimistic: every line is Same until proven otherwise.
@@ -64,7 +65,9 @@ public static class LineAligner
                 for (int i = 0; i < same.Length; i++) same[i] = false;
                 continue;
             }
-            var matched = LcsMatches(selfLines, peerLines);
+            // Match on whitespace-stripped keys when ignoreWhitespace is on,
+            // so lines that differ only in spaces/tabs count as equal.
+            var matched = LcsMatches(selfKeys, Keys(peerLines, ignoreWhitespace));
             for (int i = 0; i < same.Length; i++) same[i] = same[i] && matched[i];
         }
 
@@ -88,10 +91,14 @@ public static class LineAligner
     /// both scroll viewers to the same change without re-computing the
     /// alignment.</para>
     /// </summary>
-    public static (IReadOnlyList<AlignedPaneLine> A, IReadOnlyList<AlignedPaneLine> B) AlignPair(string a, string b)
+    public static (IReadOnlyList<AlignedPaneLine> A, IReadOnlyList<AlignedPaneLine> B) AlignPair(string a, string b, bool ignoreWhitespace = false)
     {
         var aLines = Split(a);
         var bLines = Split(b);
+        // Equality (line pairing) runs on whitespace-stripped keys when
+        // ignoreWhitespace is on; the displayed text stays the originals.
+        var aKeys = Keys(aLines, ignoreWhitespace);
+        var bKeys = Keys(bLines, ignoreWhitespace);
 
         // Edge case: one side empty → other side is "all added" (or
         // "all removed" from the empty side's perspective). No char
@@ -117,7 +124,7 @@ public static class LineAligner
         //   insert(j)   → B[j] has no A-counterpart, Different no-pair
         //   replace(i, j) → A[i] and B[j] paired but text differs,
         //                   char-diff'd; both Different with segments
-        var pairs = WalkLcsPairs(aLines, bLines);
+        var pairs = WalkLcsPairs(aKeys, bKeys);
 
         var aResult2 = new AlignedPaneLine[aLines.Length];
         var bResult2 = new AlignedPaneLine[bLines.Length];
@@ -307,4 +314,26 @@ public static class LineAligner
     private static string[] Split(string? s) =>
         string.IsNullOrEmpty(s) ? Array.Empty<string>() :
         s.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
+
+    /// <summary>
+    /// Comparison keys for a set of lines. When <paramref name="ignoreWhitespace"/>
+    /// is true every space and tab is stripped so lines that differ only in
+    /// indentation / spacing compare equal; otherwise the keys are the lines
+    /// themselves. Either way the caller keeps the original lines for display.
+    /// </summary>
+    private static string[] Keys(string[] lines, bool ignoreWhitespace)
+    {
+        if (!ignoreWhitespace) return lines;
+        var keys = new string[lines.Length];
+        for (int i = 0; i < lines.Length; i++) keys[i] = StripWhitespace(lines[i]);
+        return keys;
+    }
+
+    private static string StripWhitespace(string s)
+    {
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (var c in s)
+            if (c != ' ' && c != '\t') sb.Append(c);
+        return sb.ToString();
+    }
 }

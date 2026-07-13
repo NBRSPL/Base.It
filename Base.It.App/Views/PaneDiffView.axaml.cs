@@ -235,11 +235,15 @@ public partial class PaneDiffView : UserControl
         scroll.ScrollChanged += OnPaneScrollChanged;
         _paneScrolls.Add((scroll, text));
 
+        // Line-number gutter pinned to the left of the code, sharing its
+        // vertical scroll (see DiffPaneGutter).
+        var body = DiffPaneGutter.Wrap(scroll, pane.Lines.Count);
+
         var grid = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
         Grid.SetRow(header, 0);
-        Grid.SetRow(scroll, 1);
+        Grid.SetRow(body, 1);
         grid.Children.Add(header);
-        grid.Children.Add(scroll);
+        grid.Children.Add(body);
 
         return new Border
         {

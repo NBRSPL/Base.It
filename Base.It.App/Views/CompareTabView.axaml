@@ -24,6 +24,10 @@
                 </ItemsControl>
 
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6">
+                    <CheckBox Content="Ignore spaces &amp; tabs"
+                              VerticalAlignment="Center"
+                              IsChecked="{Binding IgnoreWhitespace}"
+                              ToolTip.Tip="Treat lines that differ only in spaces/tabs as unchanged."/>
                     <Button Content="Export CSV"
                             Click="OnExportCsvClick"
                             ToolTip.Tip="Save this comparison as a table — a Line column plus one column per environment."/>

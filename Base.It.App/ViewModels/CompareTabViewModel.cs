@@ -31,6 +31,20 @@ public sealed partial class CompareTabViewModel : ObservableObject, ICsvExportab
     [ObservableProperty] private EnvPane? _expandedPane;
     [ObservableProperty] private Vector _sharedScrollOffset = new(0, 0);
 
+    /// <summary>
+    /// When true the diff ignores spaces and tabs — lines that differ only in
+    /// indentation / spacing show as in-sync. Toggling re-aligns the already
+    /// fetched definitions (no refetch). Bound to the "Ignore spaces &amp; tabs"
+    /// checkbox above the Compare panes.
+    /// </summary>
+    [ObservableProperty] private bool _ignoreWhitespace;
+
+    /// <summary>Formatted definitions captured at load so the whitespace
+    /// toggle can re-align without hitting the database again.</summary>
+    private List<(string Label, string? Color, string Definition)>? _loadedDefs;
+
+    partial void OnIgnoreWhitespaceChanged(bool value) => BuildPanes();
+
     public ObservableCollection<EnvPane> Panes { get; } = new();
     public ObservableCollection<EnvironmentConfig> InvolvedConnections { get; } = new();
 
@@ -80,16 +94,12 @@ public sealed partial class CompareTabViewModel : ObservableObject, ICsvExportab
             // Pretty-print every side the same way *before* diffing so the
             // highlight reflects real changes, not cosmetic whitespace/casing
             // differences. Best-effort: any definition ScriptDom can't parse
-            // falls back to its raw text (Format echoes the input).
-            var allDefs = withContent.Select(x => SqlFormatter.Format(x.Definition!)).ToList();
-            for (var i = 0; i < withContent.Count; i++)
-            {
-                var profile = withContent[i].Profile;
-                var def     = allDefs[i];
-                var peers   = allDefs.Where(d => !ReferenceEquals(d, def));
-                var lines   = LineAligner.Align(def, peers);
-                Panes.Add(new EnvPane(profile.Label, profile.Color, def, lines));
-            }
+            // falls back to its raw text (Format echoes the input). Captured so
+            // the whitespace toggle can re-align without refetching.
+            _loadedDefs = withContent
+                .Select(x => (x.Profile.Label, (string?)x.Profile.Color, SqlFormatter.Format(x.Definition!)))
+                .ToList();
+            BuildPanes();
 
             var missing = collected.Count - withContent.Count;
             Status = missing == 0
@@ -98,6 +108,31 @@ public sealed partial class CompareTabViewModel : ObservableObject, ICsvExportab
         }
         catch (Exception ex) { Status = $"Error: {ex.Message}"; }
         finally               { IsBusy = false; }
+    }
+
+    /// <summary>
+    /// (Re)build the panes from <see cref="_loadedDefs"/> honouring
+    /// <see cref="IgnoreWhitespace"/>. Called after a fetch and again whenever
+    /// the whitespace toggle flips — no refetch needed.
+    /// </summary>
+    private void BuildPanes()
+    {
+        var defs = _loadedDefs;
+        if (defs is null) return;
+
+        var expandedLabel = ExpandedPane?.Label;
+        Panes.Clear();
+
+        var all = defs.Select(d => d.Definition).ToList();
+        foreach (var d in defs)
+        {
+            var peers = all.Where(x => !ReferenceEquals(x, d.Definition));
+            var lines = LineAligner.Align(d.Definition, peers, IgnoreWhitespace);
+            Panes.Add(new EnvPane(d.Label, d.Color, d.Definition, lines));
+        }
+
+        // Preserve an active expand-to-one-pane selection across a re-align.
+        ExpandedPane = expandedLabel is null ? null : Panes.FirstOrDefault(p => p.Label == expandedLabel);
     }
 
     [RelayCommand] private void Expand(EnvPane? pane) => ExpandedPane = pane;
