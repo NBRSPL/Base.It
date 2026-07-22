@@ -51,13 +51,19 @@ public class UserDefinedTypeRendererTests
     }
 
     [Fact]
-    public void Table_type_includes_inline_primary_key()
+    public void Table_type_inline_primary_key_is_UNNAMED_and_option_free()
     {
+        // SQL Server forbids NAMED constraints (and ON [filegroup] /
+        // FILLFACTOR / PAD_INDEX) inside a CREATE TYPE ... AS TABLE.
+        // Emitting the catalog's auto-generated PK name — or the filegroup
+        // / index options — makes the CREATE fail. So the rendered PK must
+        // be the anonymous, option-free form even though the source group
+        // carries a name + filegroup + fillfactor.
         var cols = new[] { SimpleColumn("Id", "int", precision: 10, scale: 0, isNullable: false) };
         var pk = new TableScriptRenderer.KeyConstraintGroup(
-            Name: "PK_OrderRows", Type: "PK",
-            IndexType: "CLUSTERED", FillFactor: 0, IsPadded: false,
-            DataSpaceName: "PRIMARY",
+            Name: "PK__OrderRows__3213E83F", Type: "PK",
+            IndexType: "CLUSTERED", FillFactor: 90, IsPadded: true,
+            DataSpaceName: "SECONDARY",
             Columns: new List<(string, bool)> { ("Id", false) });
 
         var script = TableScriptRenderer.RenderTableType(
@@ -67,8 +73,55 @@ public class UserDefinedTypeRendererTests
             checkConstraints: Array.Empty<TableScriptRenderer.CheckConstraintInfo>(),
             dbCollation: null);
 
-        Assert.Contains("PRIMARY KEY", script);
-        Assert.Contains("[PK_OrderRows]", script);
+        Assert.Contains("PRIMARY KEY CLUSTERED ([Id] ASC)", script);
+        // The auto-name and the illegal clauses must all be gone.
+        Assert.DoesNotContain("CONSTRAINT", script);
+        Assert.DoesNotContain("PK__OrderRows", script);
+        Assert.DoesNotContain("FILLFACTOR", script);
+        Assert.DoesNotContain("PAD_INDEX", script);
+        Assert.DoesNotContain("ON [SECONDARY]", script);
+    }
+
+    [Fact]
+    public void Table_type_inline_check_and_default_are_unnamed()
+    {
+        // Same rule for CHECK and DEFAULT: no CONSTRAINT [name] inside a
+        // table type.
+        var cols = new[]
+        {
+            SimpleColumn("Id", "int", precision: 10, scale: 0, isNullable: false)
+                with { DefaultName = "DF_OrderRows_Id", DefaultDefinition = "((0))" },
+        };
+        var chk = new TableScriptRenderer.CheckConstraintInfo(
+            Name: "CK_OrderRows_Id", Definition: "([Id]>(0))",
+            IsNotTrusted: false, IsNotForReplication: false);
+
+        var script = TableScriptRenderer.RenderTableType(
+            schema: "dbo", name: "OrderRows",
+            columns: cols,
+            keyConstraints: Array.Empty<TableScriptRenderer.KeyConstraintGroup>(),
+            checkConstraints: new[] { chk },
+            dbCollation: null);
+
+        Assert.Contains("DEFAULT ((0))", script);
+        Assert.Contains("CHECK ([Id]>(0))", script);
+        Assert.DoesNotContain("CONSTRAINT", script);
+        Assert.DoesNotContain("DF_OrderRows_Id", script);
+        Assert.DoesNotContain("CK_OrderRows_Id", script);
+    }
+
+    [Fact]
+    public void Real_table_still_renders_NAMED_constraints()
+    {
+        // Regression guard: the table-type unnaming must NOT leak into the
+        // real-table renderers, which require CONSTRAINT [name].
+        var pk = new TableScriptRenderer.KeyConstraintGroup(
+            Name: "PK_Orders", Type: "PK",
+            IndexType: "CLUSTERED", FillFactor: 0, IsPadded: false,
+            DataSpaceName: "PRIMARY",
+            Columns: new List<(string, bool)> { ("Id", false) });
+        var line = TableScriptRenderer.RenderKeyConstraint(pk);
+        Assert.Contains("CONSTRAINT [PK_Orders] PRIMARY KEY CLUSTERED ([Id] ASC)", line);
     }
 
     // ─── Alias / user-defined data type rendering ────────────────────────

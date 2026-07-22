@@ -133,6 +133,15 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
     [ObservableProperty] private string _statusFilter = "All";
     /// <summary>Name-substring filter, intersects with <see cref="StatusFilter"/>.</summary>
     [ObservableProperty] private string _nameFilter = "";
+    /// <summary>
+    /// When true, rows whose source + all ticked targets already match
+    /// (<see cref="BatchItem.IsInSync"/> == true) are hidden from the grid
+    /// so the operator can focus on — and execute — only what actually
+    /// needs changing. In-sync detection is content-hash based, so with
+    /// the formatter-aware hash a formatting-only difference no longer
+    /// keeps a row visible. Intersects with the status + name filters.
+    /// </summary>
+    [ObservableProperty] private bool _hideInSync;
     [ObservableProperty] private int _successCount;
     [ObservableProperty] private int _failCount;
     [ObservableProperty] private bool _isBusy;
@@ -154,8 +163,8 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
 
     // Optional user-supplied label for this run's backup folder. When empty,
     // FileBackupStore generates a millisecond timestamp like "HHmmssfff". When
-    // set, the user's label becomes the folder prefix (e.g.
-    // "before-feature-x_source_DEV") so the run is easy to find later.
+    // set, the user's label becomes the folder's trailing stamp (e.g.
+    // "source_DEV_before-feature-x") so the run is easy to find later.
     // Populated by the popup prompt in Backup/Execute when UseAutoBackupName
     // is unticked; cleared at the end of every run.
     [ObservableProperty] private string _customBackupName = "";
@@ -168,6 +177,15 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
     /// (e.g. "before-feature-x").
     /// </summary>
     [ObservableProperty] private bool _useAutoBackupName = true;
+
+    /// <summary>
+    /// When true, a Backup click writes ONE consolidated, re-runnable .sql
+    /// file per endpoint (GO-separated batches) instead of the default
+    /// folder-of-one-file-per-object layout. Handy when you want a single
+    /// artifact to archive or hand off. Default false = the granular
+    /// per-object layout the Scripts pane can re-execute selectively.
+    /// </summary>
+    [ObservableProperty] private bool _backupAsSingleScript;
 
     // Seeds StageAsDacpacBranch from settings once; prevents later refreshes
     // (e.g. after Settings "Save All") from clobbering the user's toggle.
@@ -495,6 +513,20 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
 
         try { await Task.WhenAll(tasks).ConfigureAwait(false); }
         catch (OperationCanceledException) { /* superseded */ }
+
+        // The pass just recomputed IsInSync for every row. If the
+        // "hide in-sync" filter is active, that changes which rows should
+        // be visible — rebuild the filtered view so newly-in-sync rows
+        // drop out (and no-longer-in-sync rows reappear).
+        if (HideInSync && !ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Avalonia.Threading.Dispatcher.UIThread
+                    .InvokeAsync(RebuildFilteredItems);
+            }
+            catch (OperationCanceledException) { /* shutting down */ }
+        }
     }
 
     /// <summary>
@@ -584,6 +616,7 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
 
     partial void OnStatusFilterChanged(string value) => RebuildFilteredItems();
     partial void OnNameFilterChanged(string value)   => RebuildFilteredItems();
+    partial void OnHideInSyncChanged(bool value)     => RebuildFilteredItems();
 
     private void RebuildFilteredItems()
     {
@@ -605,6 +638,11 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
             if (nameNeedle.Length > 0 &&
                 !it.Name.Contains(nameNeedle, StringComparison.OrdinalIgnoreCase))
                 continue;
+            // Hide already-in-sync rows when the toggle is on. Only rows
+            // KNOWN to be in sync (IsInSync == true) are hidden — rows that
+            // are unknown (null, e.g. sync-check hasn't run or source not
+            // found) stay visible so nothing is silently dropped.
+            if (HideInSync && it.IsInSync == true) continue;
             matched.Add(it);
         }
         foreach (var it in Sorter.Apply(matched, SortSelectors))
@@ -1934,48 +1972,10 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         // Execute, just without ALTER on targets.
         try
         {
-            foreach (var item in Items.ToList())
-            {
-                item.Status = BatchStatus.Running; item.Message = "";
-                try
-                {
-                    var id = ObjectIdentifier.Parse(item.Name.Trim());
-                    var msgs = new List<string>();
-                    int hits = 0, misses = 0;
-
-                    if (!string.IsNullOrWhiteSpace(srcConn))
-                    {
-                        var r = await _svc.Backup.BackupAsync(
-                            srcConn!, SourceEnv!, id,
-                            role: Base.It.Core.Backup.BackupRole.Source,
-                            runStamp: backupRunStamp);
-                        Tally(r, msgs, ref hits, ref misses, SourceEnv!);
-                    }
-
-                    foreach (var t in checkedTargets)
-                    {
-                        var conn = _svc.Connections.Get(t.Environment, t.Database);
-                        if (string.IsNullOrWhiteSpace(conn)) continue;
-                        var r = await _svc.Backup.BackupAsync(
-                            conn!, t.Environment, id,
-                            role: Base.It.Core.Backup.BackupRole.Target,
-                            runStamp: backupRunStamp);
-                        Tally(r, msgs, ref hits, ref misses, $"{t.Environment}·{t.Database}");
-                    }
-
-                    item.Message = string.Join(" | ", msgs);
-                    if (hits > 0)       { item.Status = BatchStatus.Success; SuccessCount++; }
-                    else if (misses > 0){ item.Status = BatchStatus.Skipped; }
-                    else                { item.Status = BatchStatus.Failed; FailCount++; }
-                }
-                catch (Exception ex)
-                {
-                    item.Status = BatchStatus.Failed; item.Message = ex.Message; FailCount++;
-                }
-            }
-            Status = $"Backup complete. Saved: {SuccessCount}, Failed: {FailCount}.";
-            if (FailCount == 0 && SuccessCount > 0) _svc.Toasts.Success("Backup complete", $"{SuccessCount} saved · {FailCount} failed.");
-            else if (FailCount > 0)                  _svc.Toasts.Warning("Backup finished with errors", $"{SuccessCount} saved · {FailCount} failed.");
+            if (BackupAsSingleScript)
+                await BackupAsSingleScriptCoreAsync(srcConn, checkedTargets, backupRunStamp);
+            else
+                await BackupAsFilesCoreAsync(srcConn, checkedTargets, backupRunStamp);
         }
         finally
         {
@@ -1983,6 +1983,135 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
             _suppressFilterRebuild = false;
             RebuildFilteredItems();
         }
+    }
+
+    /// <summary>Default backup: one file per object under a run folder.</summary>
+    private async Task BackupAsFilesCoreAsync(
+        string? srcConn, List<TargetPickVm> checkedTargets, string backupRunStamp)
+    {
+        foreach (var item in Items.ToList())
+        {
+            item.Status = BatchStatus.Running; item.Message = "";
+            try
+            {
+                var id = ObjectIdentifier.Parse(item.Name.Trim());
+                var msgs = new List<string>();
+                int hits = 0, misses = 0;
+
+                if (!string.IsNullOrWhiteSpace(srcConn))
+                {
+                    var r = await _svc.Backup.BackupAsync(
+                        srcConn!, SourceEnv!, id,
+                        role: Base.It.Core.Backup.BackupRole.Source,
+                        runStamp: backupRunStamp);
+                    Tally(r, msgs, ref hits, ref misses, SourceEnv!);
+                }
+
+                foreach (var t in checkedTargets)
+                {
+                    var conn = _svc.Connections.Get(t.Environment, t.Database);
+                    if (string.IsNullOrWhiteSpace(conn)) continue;
+                    var r = await _svc.Backup.BackupAsync(
+                        conn!, t.Environment, id,
+                        role: Base.It.Core.Backup.BackupRole.Target,
+                        runStamp: backupRunStamp);
+                    Tally(r, msgs, ref hits, ref misses, $"{t.Environment}·{t.Database}");
+                }
+
+                item.Message = string.Join(" | ", msgs);
+                if (hits > 0)       { item.Status = BatchStatus.Success; SuccessCount++; }
+                else if (misses > 0){ item.Status = BatchStatus.Skipped; }
+                else                { item.Status = BatchStatus.Failed; FailCount++; }
+            }
+            catch (Exception ex)
+            {
+                item.Status = BatchStatus.Failed; item.Message = ex.Message; FailCount++;
+            }
+        }
+        Status = $"Backup complete. Saved: {SuccessCount}, Failed: {FailCount}.";
+        if (FailCount == 0 && SuccessCount > 0) _svc.Toasts.Success("Backup complete", $"{SuccessCount} saved · {FailCount} failed.");
+        else if (FailCount > 0)                  _svc.Toasts.Warning("Backup finished with errors", $"{SuccessCount} saved · {FailCount} failed.");
+    }
+
+    /// <summary>
+    /// Single-script backup: fetch every object from every endpoint, then
+    /// write ONE consolidated .sql per endpoint. Per-row status still
+    /// reflects whether the object was found (Success) or missing
+    /// everywhere (Skipped), so the grid stays informative.
+    /// </summary>
+    private async Task BackupAsSingleScriptCoreAsync(
+        string? srcConn, List<TargetPickVm> checkedTargets, string backupRunStamp)
+    {
+        // Endpoints in a stable order: source first, then each ticked target.
+        var endpoints = new List<(string Conn, string Env, Base.It.Core.Backup.BackupRole Role, string Label)>();
+        if (!string.IsNullOrWhiteSpace(srcConn))
+            endpoints.Add((srcConn!, SourceEnv!, Base.It.Core.Backup.BackupRole.Source, SourceEnv!));
+        foreach (var t in checkedTargets)
+        {
+            var conn = _svc.Connections.Get(t.Environment, t.Database);
+            if (!string.IsNullOrWhiteSpace(conn))
+                endpoints.Add((conn!, t.Environment, Base.It.Core.Backup.BackupRole.Target, $"{t.Environment}·{t.Database}"));
+        }
+        if (endpoints.Count == 0) { Status = "No reachable endpoints to back up."; return; }
+
+        // One accumulation bucket per endpoint, index-aligned with `endpoints`.
+        var bundles = endpoints
+            .Select(_ => new List<(SqlObjectType Type, ObjectIdentifier Id, string Definition)>())
+            .ToList();
+
+        foreach (var item in Items.ToList())
+        {
+            item.Status = BatchStatus.Running; item.Message = "";
+            try
+            {
+                var id = ObjectIdentifier.Parse(item.Name.Trim());
+                var msgs = new List<string>();
+                int hits = 0, misses = 0;
+
+                for (int i = 0; i < endpoints.Count; i++)
+                {
+                    var ep = endpoints[i];
+                    var obj = await _svc.Scripter.GetObjectAsync(ep.Conn, id);
+                    if (obj is not null)
+                    {
+                        bundles[i].Add((obj.Type, id, obj.Definition));
+                        msgs.Add($"[{ep.Label}] captured");
+                        hits++;
+                    }
+                    else
+                    {
+                        msgs.Add($"[{ep.Label}] not found");
+                        misses++;
+                    }
+                }
+
+                item.Message = string.Join(" | ", msgs);
+                if (hits > 0)        { item.Status = BatchStatus.Success; SuccessCount++; }
+                else if (misses > 0) { item.Status = BatchStatus.Skipped; }
+                else                 { item.Status = BatchStatus.Failed; FailCount++; }
+            }
+            catch (Exception ex)
+            {
+                item.Status = BatchStatus.Failed; item.Message = ex.Message; FailCount++;
+            }
+        }
+
+        // Flush one consolidated script per endpoint.
+        var writtenFiles = new List<string>();
+        for (int i = 0; i < endpoints.Count; i++)
+        {
+            var path = _svc.Backups.WriteScript(
+                backupRunStamp, endpoints[i].Role, endpoints[i].Env, bundles[i]);
+            if (path is not null) writtenFiles.Add(path);
+        }
+
+        Status = writtenFiles.Count > 0
+            ? $"Backup complete — {writtenFiles.Count} single-script file(s). Objects saved: {SuccessCount}, failed: {FailCount}."
+            : $"Backup produced no files (nothing found). Failed: {FailCount}.";
+        if (writtenFiles.Count > 0 && FailCount == 0)
+            _svc.Toasts.Success("Backup complete", $"{writtenFiles.Count} script file(s) · {SuccessCount} object(s).");
+        else if (FailCount > 0)
+            _svc.Toasts.Warning("Backup finished with errors", $"{writtenFiles.Count} file(s) · {FailCount} failed.");
     }
 
     private static void Tally(Base.It.Core.Backup.BackupOutcome r,

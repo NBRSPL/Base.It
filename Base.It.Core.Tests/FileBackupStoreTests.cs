@@ -31,15 +31,52 @@ public class FileBackupStoreTests : IDisposable
 
         var rel = Path.GetRelativePath(_root, path).Replace('\\', '/');
         var parts = rel.Split('/');
-        Assert.Equal(4, parts.Length);                                  // DATE / RUN_ROLE_ENV / TYPE / file
+        Assert.Equal(4, parts.Length);                                  // DATE / ROLE_ENV_RUN / TYPE / file
         Assert.Matches(@"^\d{4}-\d{2}-\d{2}$",   parts[0]);              // yyyy-MM-dd
-        Assert.Equal("143022456_source_DEV",     parts[1]);              // run / role / env folder
+        Assert.Equal("source_DEV_143022456",     parts[1]);              // role / env / run folder (stamp trails)
         Assert.Equal("StoredProcedure",          parts[2]);              // type folder
         Assert.Equal("usp_Foo.sql",              parts[3]);              // bare name, no timestamp suffix
     }
 
     [Fact]
-    public void WriteObject_role_target_lands_in_target_subfolder()
+    public void WriteScript_writes_one_consolidated_file_with_all_objects()
+    {
+        var store = new FileBackupStore(_root);
+        var objs = new (SqlObjectType, ObjectIdentifier, string)[]
+        {
+            (SqlObjectType.StoredProcedure, new ObjectIdentifier("dbo", "usp_A"), "CREATE PROC dbo.usp_A AS SELECT 1"),
+            (SqlObjectType.View,            new ObjectIdentifier("dbo", "v_B"),   "CREATE VIEW dbo.v_B AS SELECT 2"),
+        };
+
+        var path = store.WriteScript("143022456", BackupRole.Source, "DEV", objs);
+
+        Assert.NotNull(path);
+        // Single file directly under the date folder — no per-object folders.
+        var rel = Path.GetRelativePath(_root, path!).Replace('\\', '/').Split('/');
+        Assert.Equal(2, rel.Length);
+        Assert.Matches(@"^\d{4}-\d{2}-\d{2}$", rel[0]);
+        Assert.Equal("source_DEV_143022456.sql", rel[1]);
+
+        var text = File.ReadAllText(path!);
+        Assert.Contains("[dbo].[usp_A]", text);
+        Assert.Contains("[dbo].[v_B]", text);
+        Assert.Contains("CREATE PROC dbo.usp_A AS SELECT 1", text);
+        Assert.Contains("CREATE VIEW dbo.v_B AS SELECT 2", text);
+        // GO separators so the file is re-runnable as one batch stream.
+        Assert.True(text.Split("\nGO").Length >= 3); // two objects → at least two GO markers
+    }
+
+    [Fact]
+    public void WriteScript_returns_null_for_empty_set()
+    {
+        var store = new FileBackupStore(_root);
+        var path = store.WriteScript("1", BackupRole.Manual, "DEV",
+            System.Array.Empty<(SqlObjectType, ObjectIdentifier, string)>());
+        Assert.Null(path);
+    }
+
+    [Fact]
+    public void WriteObject_role_target_lands_in_destination_subfolder()
     {
         var store = new FileBackupStore(_root);
         var id    = new ObjectIdentifier("dbo", "usp_Foo");
@@ -52,8 +89,9 @@ public class FileBackupStoreTests : IDisposable
             id:       id,
             definition: "CREATE PROC x AS SELECT 1");
 
+        // Target role → "destination" slug; env leads, stamp trails.
         var rel = Path.GetRelativePath(_root, path).Replace('\\', '/');
-        Assert.Contains("/143022456_target_PROD/", "/" + rel + "/");
+        Assert.Contains("/destination_PROD_143022456/", "/" + rel + "/");
     }
 
     [Fact]
@@ -148,6 +186,6 @@ public class FileBackupStoreTests : IDisposable
             definition: "CREATE PROC x AS SELECT 1");
 
         var rel = Path.GetRelativePath(_root, path).Replace('\\', '/');
-        Assert.Contains("/143022456_manual_PROD/", "/" + rel + "/");
+        Assert.Contains("/manual_PROD_143022456/", "/" + rel + "/");
     }
 }

@@ -187,6 +187,61 @@ END";
     }
 
     [Fact]
+    public void Create_table_breaks_each_column_onto_its_own_line()
+    {
+        var sql = "CREATE TABLE [dbo].[T] ([Id] INT NOT NULL, [Name] NVARCHAR (50) NULL, PRIMARY KEY CLUSTERED ([Id] ASC));";
+        var formatted = SqlFormatter.Format(sql);
+        var lines = formatted.Split('\n');
+
+        // Each member on its own (indented) line — not collapsed to one.
+        Assert.Contains(lines, l => l.TrimStart().StartsWith("[Id] INT"));
+        Assert.Contains(lines, l => l.TrimStart().StartsWith("[Name] NVARCHAR"));
+        Assert.Contains(lines, l => l.TrimStart().StartsWith("PRIMARY KEY CLUSTERED"));
+        // Members are indented under the opening paren.
+        Assert.Contains(lines, l => l.StartsWith("    [Id] INT"));
+    }
+
+    [Fact]
+    public void Create_type_as_table_breaks_columns_and_leaves_nested_parens_inline()
+    {
+        var sql = "CREATE TYPE [dbo].[OrderRows] AS TABLE ([RowNo] INT NOT NULL, [Qty] DECIMAL (19, 4) NULL, PRIMARY KEY CLUSTERED ([RowNo] ASC));";
+        var formatted = SqlFormatter.Format(sql);
+        var lines = formatted.Split('\n');
+
+        Assert.Contains(lines, l => l.TrimStart().StartsWith("[RowNo] INT"));
+        Assert.Contains(lines, l => l.TrimStart().StartsWith("[Qty] DECIMAL"));
+        Assert.Contains(lines, l => l.TrimStart().StartsWith("PRIMARY KEY"));
+        // The nested DECIMAL(19,4) comma must NOT break — it's deeper than
+        // the member-list depth.
+        Assert.Contains("DECIMAL (19, 4)", formatted);
+    }
+
+    [Fact]
+    public void Proc_parameter_and_select_commas_do_not_break()
+    {
+        // No TABLE keyword → the DDL layout never arms, so SELECT-list and
+        // parameter commas keep the inline ", " form (regression guard).
+        var sql = "CREATE PROC dbo.p AS SELECT a, b, c FROM t";
+        var formatted = SqlFormatter.Format(sql);
+        Assert.Contains("a, b, c", formatted);
+    }
+
+    [Fact]
+    public void Unrelated_paren_after_a_TRUNCATE_TABLE_does_not_trigger_list_mode()
+    {
+        // The TABLE keyword here is not followed by a column list; the ';'
+        // must disarm the expectation so COUNT(*) isn't treated as one.
+        var sql = "TRUNCATE TABLE dbo.t; SELECT COUNT(*) FROM dbo.u";
+        var formatted = SqlFormatter.Format(sql);
+        // Formatter's normal style puts a space before '(' after an
+        // identifier ("COUNT (*)"). The point of this test is that list
+        // mode did NOT arm — the COUNT paren stays on one line, not broken
+        // across indented lines.
+        var countLine = formatted.Split('\n').First(l => l.Contains("COUNT"));
+        Assert.Contains("COUNT (*)", countLine);
+    }
+
+    [Fact]
     public void Batch_separator_GO_gets_its_own_line_and_resets_indent()
     {
         var sql = "CREATE PROC dbo.p AS BEGIN SELECT 1 END\nGO\nSELECT 2";

@@ -76,6 +76,19 @@ internal sealed class TokenFormatter
     private bool _lineHasContent;
     private bool _needsSpace;
 
+    // ── DDL column-list layout ───────────────────────────────────────────
+    // CREATE TABLE / CREATE TYPE ... AS TABLE / DECLARE @t TABLE / RETURNS
+    // @t TABLE all have a parenthesised, comma-separated member list. The
+    // clause-starter rules don't break those, so they'd collapse onto one
+    // line. We track parenthesis depth and, when a "TABLE" keyword is
+    // followed by an opening paren, treat that paren's top-level commas as
+    // line breaks (and indent the members). Nested parens — DECIMAL(19,4),
+    // PRIMARY KEY (a, b), computed-column expressions — sit deeper than the
+    // list depth and are left inline.
+    private int  _parenDepth;
+    private int  _ddlListDepth = -1;   // paren depth of the active member list, or -1
+    private bool _expectColumnList;    // a TABLE keyword was just seen; next '(' opens a list
+
     /// <summary>
     /// Keywords that begin a new line when encountered. Deliberately
     /// conservative — includes only unambiguous statement / clause
@@ -131,6 +144,13 @@ internal sealed class TokenFormatter
 
         var text = t.Text;
 
+        // Invalidate a pending column-list expectation the moment we see a
+        // token that ISN'T part of the object name that may sit between a
+        // TABLE keyword and its '(' — so an unrelated later paren (e.g.
+        // "TRUNCATE TABLE x; SELECT COUNT(*) …") never triggers list mode.
+        if (_expectColumnList && !IsNameOrOpenParen(text, t.TokenType))
+            _expectColumnList = false;
+
         // ── Statement terminator ─────────────────────────────────────────
         if (text == ";")
         {
@@ -142,15 +162,70 @@ internal sealed class TokenFormatter
 
         // ── Punctuation that binds tightly to its neighbour ──────────────
         if (text == "." )       { _sb.Append('.');  _needsSpace = false; _lineHasContent = true; return; }
-        if (text == "," )       { _sb.Append(',');  _needsSpace = true;  _lineHasContent = true; return; }
-        if (text == ")" )       { _sb.Append(')');  _needsSpace = true;  _lineHasContent = true; return; }
+        if (text == "," )
+        {
+            _sb.Append(',');
+            _lineHasContent = true;
+            // Top-level comma of a DDL member list → break onto a new
+            // (indented) line. Everywhere else keeps the inline ", ".
+            if (_ddlListDepth > 0 && _parenDepth == _ddlListDepth) NewLine();
+            else                                                   _needsSpace = true;
+            return;
+        }
+        if (text == ")" )
+        {
+            var closingList = _ddlListDepth > 0 && _parenDepth == _ddlListDepth;
+            _parenDepth = Math.Max(0, _parenDepth - 1);
+            if (closingList)
+            {
+                // Close the member list: dedent and put ')' on its own line.
+                _indent = Math.Max(0, _indent - 1);
+                NewLine();
+                AppendIndent();
+                _ddlListDepth = -1;
+            }
+            _sb.Append(')');
+            _needsSpace = true;
+            _lineHasContent = true;
+            return;
+        }
         if (text == "]" )       { _sb.Append(']');  _needsSpace = true;  _lineHasContent = true; return; }
-        if (text == "(" )       { if (_needsSpace && _lineHasContent) _sb.Append(' '); _sb.Append('('); _needsSpace = false; _lineHasContent = true; return; }
-        if (text == "[" )       { if (_needsSpace && _lineHasContent) _sb.Append(' '); _sb.Append('['); _needsSpace = false; _lineHasContent = true; return; }
+        if (text == "(" )
+        {
+            if (!_lineHasContent)               AppendIndent();
+            else if (_needsSpace)               _sb.Append(' ');
+            _sb.Append('(');
+            _parenDepth++;
+            _needsSpace = false;
+            _lineHasContent = true;
+            // A TABLE keyword just preceded this paren → it's a member list.
+            if (_expectColumnList && _ddlListDepth == -1)
+            {
+                _ddlListDepth = _parenDepth;
+                _expectColumnList = false;
+                _indent++;
+                NewLine();   // first member starts on the next, indented line
+            }
+            return;
+        }
+        if (text == "[" )
+        {
+            if (!_lineHasContent)               AppendIndent();
+            else if (_needsSpace)               _sb.Append(' ');
+            _sb.Append('[');
+            _needsSpace = false;
+            _lineHasContent = true;
+            return;
+        }
 
         // ── Keyword casing decision ──────────────────────────────────────
         var isKeyword = IsKeywordLike(t);
         var emit      = isKeyword ? text.ToUpperInvariant() : text;
+
+        // A TABLE keyword means the next '(' opens a member list
+        // (CREATE TABLE / CREATE TYPE AS TABLE / DECLARE @t TABLE /
+        // RETURNS @t TABLE) — arm the column-list layout.
+        if (isKeyword && emit == "TABLE") _expectColumnList = true;
 
         // ── Structural keywords with their own layout ────────────────────
         if (isKeyword && emit == "BEGIN")
@@ -226,6 +301,20 @@ internal sealed class TokenFormatter
     /// Anything else that the parser labelled with a keyword-specific
     /// TokenType shows up here with a letter-leading Text and gets uppercased.
     /// </summary>
+    /// <summary>
+    /// True for tokens that may legitimately sit between a TABLE keyword
+    /// and its opening '(' — the object name parts ([x].[y]) and variables
+    /// (@t), plus the '(' itself. Anything else means the column list
+    /// didn't immediately follow, so the pending expectation is dropped.
+    /// </summary>
+    private static bool IsNameOrOpenParen(string text, TSqlTokenType type)
+    {
+        if (text is "(" or "[" or "]" or ".") return true;
+        return type is TSqlTokenType.Identifier
+                    or TSqlTokenType.QuotedIdentifier
+                    or TSqlTokenType.Variable;
+    }
+
     private static bool IsKeywordLike(TSqlParserToken t) => t.TokenType switch
     {
         TSqlTokenType.WhiteSpace           or

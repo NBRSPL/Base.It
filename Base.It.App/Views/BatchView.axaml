@@ -406,6 +406,20 @@
                                            VerticalAlignment="Center"/>
                             </StackPanel>
                         </ToggleButton>
+                        <!-- Single-script modifier: one consolidated .sql per
+                             endpoint instead of a folder of per-object files. -->
+                        <ToggleButton Classes="chip" MinHeight="22" Padding="6,1"
+                                      VerticalAlignment="Center"
+                                      IsChecked="{Binding BackupAsSingleScript}"
+                                      ToolTip.Tip="When ticked, Backup writes ONE re-runnable .sql file per endpoint (GO-separated) instead of a folder with one file per object.">
+                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="✓" FontSize="10" FontWeight="Bold"
+                                           IsVisible="{Binding BackupAsSingleScript}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="Single script" FontSize="10"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </ToggleButton>
                     </StackPanel>
                 </Grid>
             </Border>
@@ -527,9 +541,21 @@
                                     <TextBlock Text="{Binding StatusSortIndicator}" FontSize="10" Opacity="0.7"/>
                                 </StackPanel>
                             </Button>
-                            <TextBlock Grid.Column="5" Text="Message" FontSize="11" FontWeight="SemiBold"
-                                       VerticalAlignment="Center" Margin="6,0,0,0"
-                                       Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                            <!-- Message header + the in-sync filter, right-aligned
+                                 in the same header row so the toggle lives on the
+                                 table it filters (next to the ✓ in-sync column),
+                                 not adrift in the toolbar above. -->
+                            <Grid Grid.Column="5" ColumnDefinitions="Auto,*,Auto">
+                                <TextBlock Grid.Column="0" Text="Message" FontSize="11" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" Margin="6,0,0,0"
+                                           Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                <CheckBox Grid.Column="2" VerticalAlignment="Center"
+                                          Margin="0,0,8,0" FontSize="11"
+                                          MinHeight="0" VerticalContentAlignment="Center"
+                                          Content="Hide in-sync"
+                                          IsChecked="{Binding HideInSync, Mode=TwoWay}"
+                                          ToolTip.Tip="Hide rows whose source already matches every ticked target (the ✓ in-sync rows). Hidden rows are also excluded from Execute, so they won't be re-run. Content-hash based, so formatting-only differences don't keep a row visible."/>
+                            </Grid>
                         </Grid>
                     </Border>
 

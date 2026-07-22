@@ -10,11 +10,16 @@
          BatchPreviewWindow AND inline on the merged Sync screen so the two
          entry points share one renderer (and one bug surface). -->
     <Grid RowDefinitions="Auto,Auto,*">
-        <!-- Status (per-load summary: count + diffs / errors). Optional —
-             hidden when Status is empty. -->
-        <TextBlock Grid.Row="0" Text="{Binding Status}"
-                   Classes="subtle" Margin="0,0,0,4"
-                   IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+        <!-- Status (per-load summary: count + diffs / errors) on the left;
+             the whitespace toggle on the right. -->
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,4">
+            <TextBlock Grid.Column="0" Text="{Binding Status}"
+                       Classes="subtle" VerticalAlignment="Center"
+                       IsVisible="{Binding Status, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
+            <CheckBox Grid.Column="1" Content="Ignore spaces &amp; tabs"
+                      IsChecked="{Binding IgnoreWhitespace}"
+                      ToolTip.Tip="Treat lines that differ only in spaces/tabs as unchanged."/>
+        </Grid>
 
         <!-- Endpoint-failure block: only renders when at least one
              endpoint couldn't be loaded. -->

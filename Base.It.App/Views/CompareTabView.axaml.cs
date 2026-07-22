@@ -122,6 +122,10 @@ public partial class CompareTabView : UserControl
             Mode = BindingMode.TwoWay
         });
 
+        // Line-number gutter pinned to the left of the code, sharing its
+        // vertical scroll (see DiffPaneGutter).
+        var body = DiffPaneGutter.Wrap(scroll, pane.Lines.Count);
+
         var outer = new Border
         {
             CornerRadius = new CornerRadius(6),
@@ -133,9 +137,9 @@ public partial class CompareTabView : UserControl
         };
         var grid = (Grid)outer.Child;
         Grid.SetRow(header, 0);
-        Grid.SetRow(scroll, 1);
+        Grid.SetRow(body, 1);
         grid.Children.Add(header);
-        grid.Children.Add(scroll);
+        grid.Children.Add(body);
         return outer;
     }
 
