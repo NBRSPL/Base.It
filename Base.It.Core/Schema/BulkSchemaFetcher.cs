@@ -68,13 +68,22 @@ public sealed class BulkSchemaFetcher
     /// </summary>
     private const int FetchPacketSize = 16384;
 
-    /// <summary>Lightweight (no definitions) per-object metadata for incremental diffs.</summary>
+    /// <summary>
+    /// Lightweight (no definitions) per-object metadata for incremental diffs.
+    /// <see cref="ModifyDateUtc"/> is nullable: alias UDDTs live in
+    /// <c>sys.types</c> which has no modify_date, so those always fall to
+    /// a fresh fetch (there are few, and they change rarely). <see cref="ObjectId"/>
+    /// is a real sys.objects.object_id for tables / modules / table types
+    /// (the latter via <c>type_table_object_id</c>); UDDT rows carry
+    /// <c>-user_type_id</c> as a negative sentinel so the dispatcher can
+    /// tell them apart.
+    /// </summary>
     public sealed record ObjectMetadata(
         int ObjectId,
         string Schema,
         string Name,
         SqlObjectType Kind,
-        DateTime ModifyDateUtc);
+        DateTime? ModifyDateUtc);
 
     /// <summary>
     /// Trigger → parent table mapping. Used by the snapshotter to attach
@@ -159,14 +168,25 @@ WHERE tr.is_ms_shipped = 0";
                 fastConn, useCompression, p, ParallelPartitions, Bump, ct));
         }
         var tablesTask = FetchTablesAsync(fastConn, Bump, ct);
+        // Metadata in parallel too — it's how we discover TT / UDDT, which
+        // the module + table partitions don't cover.
+        var metadataTask = FetchMetadataAsync(connectionString, ct);
 
         await Task.WhenAll(moduleTasks.Concat(new[] { Task.WhenAny(tablesTask).Unwrap() }));
         await Task.WhenAll(moduleTasks); // ensure all completed
         await tablesTask;
+        await metadataTask;
 
         var result = new List<SqlObject>();
         foreach (var t in moduleTasks) result.AddRange(t.Result);
         result.AddRange(tablesTask.Result);
+
+        // Table types + alias types via the per-object type path.
+        var typeMetas = metadataTask.Result
+            .Where(m => m.Kind is SqlObjectType.TableType or SqlObjectType.UserDefinedDataType)
+            .ToList();
+        if (typeMetas.Count > 0)
+            result.AddRange(await FetchTypeDefinitionsAsync(connectionString, typeMetas, Bump, ct));
 
         rowProgress?.Report(result.Count);
         return new FetchResult(result, useCompression, ParallelPartitions + 1);
@@ -181,16 +201,45 @@ WHERE tr.is_ms_shipped = 0";
         if (string.IsNullOrWhiteSpace(connectionString))
             return Array.Empty<ObjectMetadata>();
 
+        // 3-way UNION mirrors SqlObjectScripter's discovery query so a
+        // snapshot captures every user-defined object the interactive
+        // paths see — including table types (from sys.table_types) and
+        // alias UDDTs (from sys.types), which the old sys.objects-only
+        // filter dropped entirely. Sentinels:
+        //   • sys.objects rows (tables/modules/TT via type_table_object_id)
+        //     → real object_id + real modify_date.
+        //   • UDDT rows → -user_type_id (negative id space) + NULL date.
         const string Sql = NonBlockingPreamble + @"
 SELECT
-    o.object_id,
-    SCHEMA_NAME(o.schema_id) AS schema_name,
-    o.name                   AS object_name,
-    o.type                   AS type_code,
-    o.modify_date            AS modify_date
+    o.object_id                  AS object_id,
+    SCHEMA_NAME(o.schema_id)     AS schema_name,
+    o.name                       AS object_name,
+    o.type                       AS type_code,
+    o.modify_date                AS modify_date
 FROM sys.objects o
 WHERE o.is_ms_shipped = 0
-" + AllUserObjectTypesFilter;
+  AND o.type <> 'TT'
+" + AllUserObjectTypesFilter + @"
+UNION ALL
+SELECT
+    tt.type_table_object_id      AS object_id,
+    SCHEMA_NAME(tt.schema_id)    AS schema_name,
+    tt.name                      AS object_name,
+    'TT'                         AS type_code,
+    o.modify_date                AS modify_date
+FROM sys.table_types tt
+INNER JOIN sys.objects o ON o.object_id = tt.type_table_object_id
+WHERE tt.is_user_defined = 1
+UNION ALL
+SELECT
+    -CAST(t.user_type_id AS INT) AS object_id,
+    SCHEMA_NAME(t.schema_id)     AS schema_name,
+    t.name                       AS object_name,
+    'UDDT'                       AS type_code,
+    CAST(NULL AS DATETIME)       AS modify_date
+FROM sys.types t
+WHERE t.is_user_defined = 1
+  AND t.is_table_type   = 0";
 
         var list = new List<ObjectMetadata>(8000);
         await using var conn = new SqlConnection(WithFastPacketSize(connectionString));
@@ -203,7 +252,9 @@ WHERE o.is_ms_shipped = 0
             var schema = reader.GetString(1);
             var name   = reader.GetString(2);
             var code   = reader.GetString(3).Trim().ToUpperInvariant();
-            var modify = DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc);
+            DateTime? modify = await reader.IsDBNullAsync(4, ct)
+                ? null
+                : DateTime.SpecifyKind(reader.GetDateTime(4), DateTimeKind.Utc);
 
             var kind = TypeCodeToKind(code);
             if (kind == SqlObjectType.Unknown) continue;
@@ -211,6 +262,46 @@ WHERE o.is_ms_shipped = 0
             list.Add(new ObjectMetadata(oid, schema, name, kind, modify));
         }
         return list;
+    }
+
+    /// <summary>
+    /// Fetch full definitions for table types + alias UDDTs by delegating
+    /// to <see cref="Sql.SqlObjectScripter"/> (which owns the CREATE TYPE
+    /// rendering). Per-object, bounded at <see cref="ParallelPartitions"/>
+    /// concurrent connections — TT/UDDT counts are small, so this is cheap
+    /// and never dominates a snapshot. The bulk table/module paths can't
+    /// render these (a table type isn't in sys.tables, a UDDT isn't in
+    /// sys.objects at all), so they get their own path.
+    /// </summary>
+    public static async Task<List<SqlObject>> FetchTypeDefinitionsAsync(
+        string connectionString,
+        IReadOnlyList<ObjectMetadata> typeMetas,
+        Action? onRow,
+        CancellationToken ct)
+    {
+        var results = new List<SqlObject>(typeMetas.Count);
+        if (typeMetas.Count == 0) return results;
+
+        var scripter = new Sql.SqlObjectScripter();
+        using var gate = new SemaphoreSlim(ParallelPartitions);
+        var lockObj = new object();
+
+        var tasks = typeMetas.Select(async m =>
+        {
+            await gate.WaitAsync(ct);
+            try
+            {
+                var obj = await scripter.GetObjectAsync(
+                    connectionString, new ObjectIdentifier(m.Schema, m.Name), ct);
+                if (obj is null) return;
+                lock (lockObj) results.Add(obj);
+                onRow?.Invoke();
+            }
+            finally { gate.Release(); }
+        }).ToList();
+
+        await Task.WhenAll(tasks);
+        return results;
     }
 
     public async Task<FetchResult> FetchByObjectIdsAsync(
@@ -856,6 +947,8 @@ ORDER BY t.object_id, i.name, ic.is_included_column, ic.key_ordinal, ic.index_co
         "TF" or "FT"           => SqlObjectType.TableValuedFunction,
         "V"                    => SqlObjectType.View,
         "TR"                   => SqlObjectType.Trigger,
+        "TT"                   => SqlObjectType.TableType,
+        "UDDT"                 => SqlObjectType.UserDefinedDataType,
         _                      => SqlObjectType.Unknown
     };
 

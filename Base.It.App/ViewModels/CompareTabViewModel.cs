@@ -37,13 +37,19 @@ public sealed partial class CompareTabViewModel : ObservableObject, ICsvExportab
     /// fetched definitions (no refetch). Bound to the "Ignore spaces &amp; tabs"
     /// checkbox above the Compare panes.
     /// </summary>
-    [ObservableProperty] private bool _ignoreWhitespace;
+    // Seeded from the persisted preference so the choice survives across
+    // Compare tabs and app restarts (shared with the Batch/Sync preview).
+    [ObservableProperty] private bool _ignoreWhitespace = Services.DiffViewPrefs.IgnoreWhitespace;
 
     /// <summary>Formatted definitions captured at load so the whitespace
     /// toggle can re-align without hitting the database again.</summary>
     private List<(string Label, string? Color, string Definition)>? _loadedDefs;
 
-    partial void OnIgnoreWhitespaceChanged(bool value) => BuildPanes();
+    partial void OnIgnoreWhitespaceChanged(bool value)
+    {
+        Services.DiffViewPrefs.IgnoreWhitespace = value; // persist across tabs + restarts
+        BuildPanes();
+    }
 
     public ObservableCollection<EnvPane> Panes { get; } = new();
     public ObservableCollection<EnvironmentConfig> InvolvedConnections { get; } = new();

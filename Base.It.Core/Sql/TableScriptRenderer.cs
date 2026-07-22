@@ -160,9 +160,12 @@ public static class TableScriptRenderer
 
         var bodyLines = new List<string>(columns.Count + keyConstraints.Count + checkConstraints.Count);
         for (int i = 0; i < columns.Count; i++)
-            bodyLines.Add(RenderColumn(columns[i], nameField[i], typeField[i], maxName, maxType, dbCollation));
-        foreach (var k in keyConstraints)   bodyLines.Add(RenderKeyConstraint(k));
-        foreach (var c in checkConstraints) bodyLines.Add(RenderCheckConstraint(c));
+            bodyLines.Add(RenderColumn(columns[i], nameField[i], typeField[i], maxName, maxType, dbCollation, forTableType: true));
+        // Table-type constraints are UNNAMED and option-free — use the
+        // table-type-specific renderers, NOT the real-table ones (which
+        // emit CONSTRAINT [name] ... ON [filegroup], both illegal here).
+        foreach (var k in keyConstraints)   bodyLines.Add(RenderTableTypeKeyConstraint(k));
+        foreach (var c in checkConstraints) bodyLines.Add(RenderTableTypeCheckConstraint(c));
 
         sb.Append(string.Join(",\n", bodyLines));
         sb.Append("\n);\nGO\n");
@@ -195,8 +198,16 @@ public static class TableScriptRenderer
 
     // ─── Per-element rendering helpers ─────────────────────────────────────
 
+    /// <param name="forTableType">
+    /// True when rendering a column inside a <c>CREATE TYPE ... AS TABLE</c>.
+    /// Table types forbid NAMED constraints, so an inline DEFAULT is
+    /// emitted without its <c>CONSTRAINT [name]</c> prefix (the value is
+    /// unchanged — only the name is dropped). Default false preserves the
+    /// exact real-table output.
+    /// </param>
     public static string RenderColumn(
-        ColumnInfo c, string nameField, string typeField, int maxName, int maxType, string? dbCollation)
+        ColumnInfo c, string nameField, string typeField, int maxName, int maxType, string? dbCollation,
+        bool forTableType = false)
     {
         // Computed columns have no type / nullability / default — just the expression.
         if (c.ComputedDefinition is not null)
@@ -229,7 +240,9 @@ public static class TableScriptRenderer
         if (c.DefaultDefinition is not null)
         {
             sb.Append(' ');
-            if (c.DefaultName is not null)
+            // Named DEFAULT constraints are illegal inside a table type —
+            // emit the value without the CONSTRAINT [name] prefix there.
+            if (c.DefaultName is not null && !forTableType)
                 sb.Append("CONSTRAINT [").Append(c.DefaultName).Append("] ");
             sb.Append("DEFAULT ").Append(c.DefaultDefinition);
         }
@@ -281,6 +294,33 @@ public static class TableScriptRenderer
         var nfr = c.IsNotForReplication ? " NOT FOR REPLICATION" : "";
         return $"    CONSTRAINT [{c.Name}] CHECK{nfr} {c.Definition}";
     }
+
+    /// <summary>
+    /// PK / UNIQUE as it must appear INSIDE a <c>CREATE TYPE ... AS TABLE</c>:
+    /// UNNAMED, and without the <c>ON [filegroup]</c> / FILLFACTOR / PAD_INDEX
+    /// clauses. SQL Server rejects all of those in a table type — which is
+    /// exactly why <see cref="RenderKeyConstraint"/> (correct for a real
+    /// table) can't be reused here. CLUSTERED / NONCLUSTERED is kept because
+    /// it IS allowed. The auto-generated catalog constraint name is dropped
+    /// intentionally: a table type's PK is anonymous, so echoing the
+    /// server's internal name back in the CREATE would fail.
+    /// </summary>
+    public static string RenderTableTypeKeyConstraint(KeyConstraintGroup k)
+    {
+        var kind = k.Type.Equals("PK", StringComparison.OrdinalIgnoreCase)
+            ? "PRIMARY KEY"
+            : "UNIQUE";
+        var cols = string.Join(", ", k.Columns.Select(c => $"[{c.Column}] {(c.Desc ? "DESC" : "ASC")}"));
+        return $"    {kind} {k.IndexType} ({cols})";
+    }
+
+    /// <summary>
+    /// CHECK as it must appear inside a table type: UNNAMED (and NOT FOR
+    /// REPLICATION doesn't apply to table types). The definition text from
+    /// the catalog already carries its own parentheses.
+    /// </summary>
+    public static string RenderTableTypeCheckConstraint(CheckConstraintInfo c)
+        => $"    CHECK {c.Definition}";
 
     public static string RenderForeignKey(ForeignKeyGroup fk, string parentSchema, string parentTable)
     {

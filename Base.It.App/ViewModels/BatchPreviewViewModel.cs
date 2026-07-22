@@ -65,7 +65,9 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
     /// loaded definitions (no refetch). Bound to the "Ignore spaces &amp; tabs"
     /// checkbox in the preview.
     /// </summary>
-    [ObservableProperty] private bool _ignoreWhitespace;
+    // Seeded from the persisted preference so the choice survives closing
+    // a preview, opening another, and app restarts.
+    [ObservableProperty] private bool _ignoreWhitespace = Services.DiffViewPrefs.IgnoreWhitespace;
 
     /// <summary>Formatted definitions captured at load, so the whitespace
     /// toggle can re-align without hitting the database again.</summary>
@@ -75,7 +77,11 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
     /// rebuild (fetch failures survive a whitespace-toggle re-align).</summary>
     private string _fetchFailureBlock = "";
 
-    partial void OnIgnoreWhitespaceChanged(bool value) => BuildPanes();
+    partial void OnIgnoreWhitespaceChanged(bool value)
+    {
+        Services.DiffViewPrefs.IgnoreWhitespace = value; // persist across previews + restarts
+        BuildPanes();
+    }
 
     /// <summary>
     /// Line indices (0-based, in the first pane's Lines list) where a

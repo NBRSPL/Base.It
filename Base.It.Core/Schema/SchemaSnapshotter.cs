@@ -78,7 +78,15 @@ public sealed class SchemaSnapshotter
             // Pair every current object with its previous-snapshot entry
             // (if any). Unchanged modify_date AND same Kind = safe to
             // reuse the hash. Otherwise, fetch a fresh definition.
-            var idsToFetch = new List<int>();
+            //
+            // Modules + tables fetch by object_id (bulk, batched). Table
+            // types + alias UDDTs can't be rendered by the by-id paths (a
+            // table type isn't in sys.tables; a UDDT isn't in sys.objects),
+            // so they collect into a separate metas list and go through the
+            // per-object type path. UDDTs also have no modify_date, so they
+            // never satisfy the reuse test — always re-fetched (cheap; few).
+            var idsToFetch   = new List<int>();
+            var typesToFetch = new List<BulkSchemaFetcher.ObjectMetadata>();
             reused = new List<SnapshotEntry>(metadata.Count);
             foreach (var m in metadata)
             {
@@ -86,12 +94,18 @@ public sealed class SchemaSnapshotter
                 if (prevByKey.TryGetValue(key, out var prev)
                     && prev.Kind == m.Kind
                     && prev.ModifiedAtUtc.HasValue
-                    && prev.ModifiedAtUtc.Value == m.ModifyDateUtc)
+                    && m.ModifyDateUtc.HasValue
+                    && prev.ModifiedAtUtc.Value == m.ModifyDateUtc.Value)
                 {
                     // Reuse: same name, same kind, same modify_date.
                     // Refresh the modify_date in case it was stored
                     // with an off-by-tick precision.
                     reused.Add(prev with { ModifiedAtUtc = m.ModifyDateUtc });
+                }
+                else if (m.Kind is Base.It.Core.Models.SqlObjectType.TableType
+                                or Base.It.Core.Models.SqlObjectType.UserDefinedDataType)
+                {
+                    typesToFetch.Add(m);
                 }
                 else
                 {
@@ -100,7 +114,7 @@ public sealed class SchemaSnapshotter
             }
 
             reusedCount  = reused.Count;
-            fetchedCount = idsToFetch.Count;
+            fetchedCount = idsToFetch.Count + typesToFetch.Count;
 
             // Surface the reuse split so the UI's progress text can show
             // "reused N, fetching M" while the by-id query runs.
@@ -108,19 +122,22 @@ public sealed class SchemaSnapshotter
                 SnapshotPhase.Fetching, 0, fetchedCount, fetchSw.Elapsed,
                 ReusedFromPrevious: reusedCount));
 
+            var fetchedList = new List<Base.It.Core.Models.SqlObject>(fetchedCount);
+            usedCompression = false;
+            connectionsUsed = 0;
             if (idsToFetch.Count > 0)
             {
                 var res = await _fetcher.FetchByObjectIdsAsync(connectionString, idsToFetch, fetchProgress, ct);
-                fetched = res.Objects;
+                fetchedList.AddRange(res.Objects);
                 usedCompression = res.UsedCompression;
                 connectionsUsed = res.Connections;
             }
-            else
+            if (typesToFetch.Count > 0)
             {
-                fetched = Array.Empty<Base.It.Core.Models.SqlObject>();
-                usedCompression = false;
-                connectionsUsed = 0;
+                fetchedList.AddRange(await BulkSchemaFetcher.FetchTypeDefinitionsAsync(
+                    connectionString, typesToFetch, onRow: null, ct));
             }
+            fetched = fetchedList;
 
             // Build modify_date lookup so the fresh fetches inherit the
             // current server's modify_date (so the next snapshot can
@@ -166,7 +183,7 @@ public sealed class SchemaSnapshotter
                     m => $"{m.Schema.ToUpperInvariant()}.{m.Name.ToUpperInvariant()}",
                     m => m.ModifyDateUtc,
                     StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
+            : new Dictionary<string, DateTime?>(StringComparer.OrdinalIgnoreCase);
 
         using var gate = new SemaphoreSlim(MaxParallelWrites);
         var tasks = new List<Task>(fetched.Count);
