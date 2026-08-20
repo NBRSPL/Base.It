@@ -270,6 +270,18 @@ public sealed partial class WatchViewModel : ObservableObject, ICsvExportable
     /// <summary>Flat projection over every section's rows. Used by Stage / Send-to-Batch.</summary>
     public IEnumerable<DriftRowVm> LiveRows => Sections.SelectMany(s => s.Rows);
 
+    /// <summary>
+    /// Grand total of drift rows across every section — the count of
+    /// changed objects currently shown (in-sync objects are filtered out of
+    /// the lists, so this is exactly the visible object count). Complements
+    /// the per-section "N changes" pills. Updates live as rows stream in.
+    /// </summary>
+    public int TotalVisibleCount => Sections.Sum(s => s.Count);
+
+    /// <summary>Header summary for <see cref="TotalVisibleCount"/>.</summary>
+    public string VisibleCountSummary =>
+        TotalVisibleCount == 1 ? "1 changed object" : $"{TotalVisibleCount} changed objects";
+
     // ─────────────────────────── Sorting ───────────────────────────
     // The Watch pane has no clickable column header (rows stream in live),
     // so sort is driven from a toolbar control. Order is applied within
@@ -451,6 +463,15 @@ public sealed partial class WatchViewModel : ObservableObject, ICsvExportable
     /// </summary>
     private void OnSectionPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        // A section's row count changed (rows streamed in / cleared) → the
+        // grand-total header count needs to refresh.
+        if (e.PropertyName == nameof(WatchSectionVm.Count))
+        {
+            OnPropertyChanged(nameof(TotalVisibleCount));
+            OnPropertyChanged(nameof(VisibleCountSummary));
+            return;
+        }
+
         if (e.PropertyName != nameof(WatchSectionVm.IsScanEnabled)) return;
         if (sender is not WatchSectionVm section || Selected is null) return;
 

@@ -64,6 +64,9 @@ public sealed partial class ScriptsViewModel : ObservableObject, ICsvExportable
     public ObservableCollection<TargetPickVm>    Targets         { get; } = new();
     public ObservableCollection<TargetPickVm>    FilteredTargets { get; } = new();
 
+    /// <summary>Total .sql files in the list — shown in the items toolbar.</summary>
+    public string FileCountSummary => $"{Items.Count} file{(Items.Count == 1 ? "" : "s")}";
+
     /// <summary>Flat endpoint list (every visible connection) for the target picker.</summary>
     public ObservableCollection<EndpointPick> Endpoints { get; } = new();
 
@@ -95,7 +98,7 @@ public sealed partial class ScriptsViewModel : ObservableObject, ICsvExportable
     public ScriptsViewModel(AppServices svc)
     {
         _svc = svc;
-        Items.CollectionChanged += (_, _) => Renumber();
+        Items.CollectionChanged += (_, _) => { Renumber(); OnPropertyChanged(nameof(FileCountSummary)); };
         Reload();
     }
 

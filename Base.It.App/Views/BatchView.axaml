@@ -462,7 +462,14 @@
                                        FontSize="11"
                                        Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                                        Text="{Binding FailCount, StringFormat='Fail: {0}'}"/>
-                            <!-- spacer @ col 5 -->
+                            <!-- Visible/total object count — sits in the flexible
+                                 spacer column so it trails the OK/Fail counters.
+                                 Updates live as filters (incl. Hide in-sync) change. -->
+                            <TextBlock Grid.Column="5" VerticalAlignment="Center" Margin="14,0,0,0"
+                                       HorizontalAlignment="Left"
+                                       FontSize="11" Opacity="0.7"
+                                       Text="{Binding CountSummary}"
+                                       ToolTip.Tip="Objects currently visible after filters (Status, name, Hide in-sync), out of the total loaded."/>
                             <Button Grid.Column="6" Padding="8,2" MinHeight="26"
                                     Content="Export CSV"
                                     Click="OnExportCsvClick"
@@ -554,7 +561,7 @@
                                           MinHeight="0" VerticalContentAlignment="Center"
                                           Content="Hide in-sync"
                                           IsChecked="{Binding HideInSync, Mode=TwoWay}"
-                                          ToolTip.Tip="Hide rows whose source already matches every ticked target (the ✓ in-sync rows). Hidden rows are also excluded from Execute, so they won't be re-run. Content-hash based, so formatting-only differences don't keep a row visible."/>
+                                          ToolTip.Tip="Hide rows whose source already matches every ticked target (the ✓ in-sync rows). Differences that are only whitespace, tabs, indentation, or formatting count as in-sync and are hidden too. Hidden rows are also excluded from Execute."/>
                             </Grid>
                         </Grid>
                     </Border>
@@ -709,13 +716,15 @@
                             Content="Execute Selected"
                             Command="{Binding ExecuteSelectedCommand}"
                             IsEnabled="{Binding !IsBusy}"
-                            ToolTip.Tip="Run only rows whose checkbox is ticked. Same scope rule as Remove Selected."/>
+                            ToolTip.Placement="Top" ToolTip.VerticalOffset="-6"
+                            ToolTip.Tip="Execute only the ticked rows against every selected target. Each target is backed up first."/>
                     <Button Grid.Column="2" Classes="accent" Margin="6,0,0,0"
                             MinWidth="120" MinHeight="30" FontSize="12" FontWeight="SemiBold"
                             Content="Execute"
                             Command="{Binding ExecuteCommand}"
                             IsEnabled="{Binding !IsBusy}"
-                            ToolTip.Tip="Run every row currently visible (respects the active filter)."/>
+                            ToolTip.Placement="Top" ToolTip.VerticalOffset="-6"
+                            ToolTip.Tip="Execute every visible row (after the current filter) against every selected target. Each target is backed up first."/>
                 </Grid>
             </Border>
 

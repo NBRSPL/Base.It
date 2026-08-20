@@ -218,6 +218,15 @@
                                                    VerticalAlignment="Bottom"
                                                    Text="(select a snapshot on the left)"
                                                    IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNull}}"/>
+                                        <!-- Visible/total object count — replaces the
+                                             hint once a snapshot is picked; tracks the
+                                             name / schema / type filters. -->
+                                        <TextBlock Grid.Column="1" Margin="8,0,0,0"
+                                                   FontSize="11" Opacity="0.6"
+                                                   VerticalAlignment="Bottom"
+                                                   Text="{Binding EntryCountSummary}"
+                                                   IsVisible="{Binding SelectedSnapshot, Converter={x:Static ObjectConverters.IsNotNull}}"
+                                                   ToolTip.Tip="Objects currently visible after filters, out of the total in this snapshot."/>
                                         <Button Grid.Column="2" Margin="0,0,6,0" Padding="8,2" MinHeight="26"
                                                 Content="Export CSV"
                                                 Click="OnExportEntriesClick"

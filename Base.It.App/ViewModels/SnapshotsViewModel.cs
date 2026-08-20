@@ -170,6 +170,15 @@ public sealed partial class SnapshotsViewModel : ObservableObject
 
     public ObservableCollection<SnapshotEntryVm> Entries { get; } = new();
 
+    /// <summary>
+    /// Object-count summary for the Entries grid header: "N objects" when
+    /// nothing is filtered out, "N of M objects" when the name / schema /
+    /// type filters are trimming the list. Updates live with the filters.
+    /// </summary>
+    public string EntryCountSummary => Entries.Count == _allEntries.Count
+        ? $"{_allEntries.Count} object{(_allEntries.Count == 1 ? "" : "s")}"
+        : $"{Entries.Count} of {_allEntries.Count} objects";
+
     [ObservableProperty] private string _entryFilter = "";
 
     [ObservableProperty] private SnapshotEntryVm? _selectedEntry;
@@ -520,6 +529,9 @@ public sealed partial class SnapshotsViewModel : ObservableObject
             }
             Entries.Add(e);
         }
+
+        OnPropertyChanged(nameof(EntriesHaveRows));
+        OnPropertyChanged(nameof(EntryCountSummary));
     }
 
     /// <summary>

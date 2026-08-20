@@ -66,12 +66,20 @@
         <Grid Grid.Row="0" Grid.Column="1" RowDefinitions="Auto,*,Auto">
 
             <Border Grid.Row="0" Classes="toolbar" Margin="0,0,0,8">
-                <StackPanel Orientation="Vertical">
-                    <TextBlock Text="{Binding HeaderTitle}"    FontSize="16" FontWeight="SemiBold"/>
-                    <TextBlock Text="{Binding HeaderSubtitle}" Opacity="0.75" FontSize="12" Margin="0,2,0,0"
-                               TextWrapping="Wrap"/>
-                    <TextBlock Text="{Binding LastUpdatedText}" Opacity="0.55" FontSize="11" FontStyle="Italic" Margin="0,2,0,0"/>
-                </StackPanel>
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackPanel Grid.Column="0" Orientation="Vertical">
+                        <TextBlock Text="{Binding HeaderTitle}"    FontSize="16" FontWeight="SemiBold"/>
+                        <TextBlock Text="{Binding HeaderSubtitle}" Opacity="0.75" FontSize="12" Margin="0,2,0,0"
+                                   TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding LastUpdatedText}" Opacity="0.55" FontSize="11" FontStyle="Italic" Margin="0,2,0,0"/>
+                    </StackPanel>
+                    <!-- Grand-total changed-object count across all sections.
+                         Shown only once a group is selected. -->
+                    <Border Grid.Column="1" Classes="countPill" VerticalAlignment="Center" Margin="8,0,0,0"
+                            IsVisible="{Binding HeaderTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <TextBlock Text="{Binding VisibleCountSummary}"/>
+                    </Border>
+                </Grid>
             </Border>
 
             <!-- Sections: fixed order SP → Functions → Triggers → Tables → Views.

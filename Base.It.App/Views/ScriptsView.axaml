@@ -170,27 +170,31 @@
                             BorderBrush="{DynamicResource App.StrokeBrush}"
                             BorderThickness="0,0,0,1"
                             Padding="10,6">
-                        <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto">
+                        <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto,Auto">
                             <TextBlock Grid.Column="0" Text="Files" VerticalAlignment="Center"
                                        FontSize="11" Opacity="0.7" Margin="0,0,8,0"/>
-                            <!-- spacer @ col 1 -->
-                            <Button Grid.Column="2" Margin="0,0,4,0" Padding="8,2" MinHeight="26"
+                            <TextBlock Grid.Column="1" Text="{Binding FileCountSummary}"
+                                       VerticalAlignment="Center"
+                                       FontSize="11" Opacity="0.7" Margin="0,0,8,0"
+                                       ToolTip.Tip="Total .sql files currently in the list."/>
+                            <!-- spacer @ col 2 -->
+                            <Button Grid.Column="3" Margin="0,0,4,0" Padding="8,2" MinHeight="26"
                                     Content="Export CSV"
                                     Click="OnExportCsvClick"
                                     ToolTip.Tip="Save the current rows (in their displayed order) to a .csv file."/>
-                            <Button Grid.Column="3" Margin="0,0,4,0" Padding="8,2" MinHeight="26"
+                            <Button Grid.Column="4" Margin="0,0,4,0" Padding="8,2" MinHeight="26"
                                     Content="Remove selected"
                                     Command="{Binding RemoveCheckedCommand}"
                                     ToolTip.Tip="Remove rows whose checkbox is ticked."/>
-                            <Button Grid.Column="4" Margin="0,0,4,0" Padding="8,2" MinHeight="26"
+                            <Button Grid.Column="5" Margin="0,0,4,0" Padding="8,2" MinHeight="26"
                                     Content="Clear"
                                     Command="{Binding ClearCommand}"
                                     ToolTip.Tip="Remove every row from the list."/>
-                            <TextBlock Grid.Column="5" VerticalAlignment="Center" Margin="12,0,12,0"
+                            <TextBlock Grid.Column="6" VerticalAlignment="Center" Margin="12,0,12,0"
                                        FontSize="11"
                                        Foreground="{DynamicResource SystemFillColorSuccessBrush}"
                                        Text="{Binding SuccessCount, StringFormat='OK: {0}'}"/>
-                            <TextBlock Grid.Column="6" VerticalAlignment="Center"
+                            <TextBlock Grid.Column="7" VerticalAlignment="Center"
                                        FontSize="11"
                                        Foreground="{DynamicResource SystemFillColorCriticalBrush}"
                                        Text="{Binding FailCount, StringFormat='Fail: {0}'}"/>

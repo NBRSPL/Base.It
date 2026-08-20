@@ -77,11 +77,31 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
     /// rebuild (fetch failures survive a whitespace-toggle re-align).</summary>
     private string _fetchFailureBlock = "";
 
+    // Guards the auto-seed path (see MaybeAutoEnableIgnoreWhitespace): when
+    // set, flipping IgnoreWhitespace neither persists the global default nor
+    // rebuilds the panes (LoadAsync rebuilds right after), but the property
+    // change still notifies the checkbox binding.
+    private bool _seedingIgnoreWhitespace;
+
     partial void OnIgnoreWhitespaceChanged(bool value)
     {
+        if (_seedingIgnoreWhitespace) return;
         Services.DiffViewPrefs.IgnoreWhitespace = value; // persist across previews + restarts
         BuildPanes();
     }
+
+    /// <summary>
+    /// When true, <see cref="LoadAsync"/> auto-ticks <see cref="IgnoreWhitespace"/>
+    /// if the loaded definitions match ONLY after whitespace is ignored — i.e.
+    /// the object is "in sync" purely because of formatting (the same rule the
+    /// Batch ✓ tick uses). This makes previewing an in-sync-by-whitespace row
+    /// open with "Ignore spaces &amp; tabs" already ticked, so the preview
+    /// agrees with the tick. If the sides are byte-identical (in sync without
+    /// needing whitespace removal), the checkbox is left at its usual default.
+    /// Not persisted — affects only this preview instance. Set by the Batch row
+    /// preview builder; left off for snapshot / script previews.
+    /// </summary>
+    public bool AutoIgnoreWhitespaceForInSync { get; set; }
 
     /// <summary>
     /// Line indices (0-based, in the first pane's Lines list) where a
@@ -259,6 +279,47 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
     }
 
     /// <summary>
+    /// If <see cref="AutoIgnoreWhitespaceForInSync"/> is set, turn on
+    /// <see cref="IgnoreWhitespace"/> when the loaded definitions differ in
+    /// text but are equal under the whitespace-insensitive hash — i.e. the
+    /// only differences are spaces / tabs / formatting, exactly the case the
+    /// Batch ✓ tick calls "in sync". Byte-identical sides are left untouched
+    /// (nothing to ignore); genuinely different sides are left untouched
+    /// (there's a real change to show). Sets the backing field directly so it
+    /// does NOT write to the persisted DiffViewPrefs default — this is a
+    /// per-preview nudge, not a preference change.
+    /// </summary>
+    private void MaybeAutoEnableIgnoreWhitespace()
+    {
+        if (!AutoIgnoreWhitespaceForInSync) return;
+        if (IgnoreWhitespace) return;                 // already on (user pref) — nothing to do
+        var defs = _loadedDefs;
+        if (defs is not { Count: >= 2 }) return;
+
+        var first = defs[0].Definition;
+        // Byte-identical already → "normally that way", leave the checkbox as-is.
+        if (defs.All(d => string.Equals(d.Definition, first, StringComparison.Ordinal))) return;
+
+        // Match ONLY after whitespace removal? Use the same whitespace-
+        // insensitive, literal-preserving hash the tick uses, so a real
+        // difference inside a string literal ('a b' vs 'a  b') does NOT
+        // trip this.
+        var firstHash = Base.It.Core.Hashing.DefinitionHasher.Hash(first);
+        bool hashEqual = defs.All(d => string.Equals(
+            Base.It.Core.Hashing.DefinitionHasher.Hash(d.Definition), firstHash, StringComparison.Ordinal));
+
+        if (hashEqual)
+        {
+            // Flip via the property (so the checkbox binding updates) but under
+            // the seed guard so it doesn't persist the global default; LoadAsync
+            // rebuilds the panes with this value immediately after.
+            _seedingIgnoreWhitespace = true;
+            try { IgnoreWhitespace = true; }
+            finally { _seedingIgnoreWhitespace = false; }
+        }
+    }
+
+    /// <summary>
     /// (Re)build the panes from <see cref="_loadedDefs"/> honouring
     /// <see cref="IgnoreWhitespace"/>. Called after a load and again whenever
     /// the whitespace toggle flips — no refetch needed. Two definitions use
@@ -417,6 +478,11 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
             _fetchFailureBlock = failures.Count > 0
                 ? "Some endpoints couldn't be loaded:\n" + string.Join('\n', failures)
                 : "";
+
+            // If this preview was opened for an in-sync (✓) row and the sides
+            // match only after whitespace is ignored, pre-tick the toggle so
+            // the preview reflects the same verdict as the tick.
+            MaybeAutoEnableIgnoreWhitespace();
 
             // Pair-aware char-diff for two panes, N-way Align for more —
             // honouring the whitespace toggle. (See BuildPanes.)
