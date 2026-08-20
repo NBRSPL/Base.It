@@ -197,6 +197,30 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
     public ObservableCollection<BatchItem>     Items           { get; } = new();
     public ObservableCollection<BatchItem>     FilteredItems   { get; } = new();
 
+    /// <summary>Rows currently visible after the status / name / hide-in-sync filters.</summary>
+    public int VisibleCount => FilteredItems.Count;
+
+    /// <summary>Total rows loaded, before any filter.</summary>
+    public int TotalObjectCount => Items.Count;
+
+    /// <summary>
+    /// Compact object-count summary for the items toolbar. Reads
+    /// "N objects" when nothing is filtered out, and "N of M objects" when
+    /// the status / name / hide-in-sync filters are hiding some rows — so
+    /// the number always reflects what's actually on screen (and drops as
+    /// soon as Hide in-sync trims the list).
+    /// </summary>
+    public string CountSummary => VisibleCount == TotalObjectCount
+        ? $"{TotalObjectCount} object{(TotalObjectCount == 1 ? "" : "s")}"
+        : $"{VisibleCount} of {TotalObjectCount} objects";
+
+    private void NotifyCountsChanged()
+    {
+        OnPropertyChanged(nameof(VisibleCount));
+        OnPropertyChanged(nameof(TotalObjectCount));
+        OnPropertyChanged(nameof(CountSummary));
+    }
+
     public ObservableCollection<EndpointPick>     Endpoints       { get; } = new();
     public ObservableCollection<EndpointProfile>  Profiles        { get; } = new();
     public ObservableCollection<TargetPickVm>     FilteredTargets { get; } = new();
@@ -649,6 +673,8 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
             FilteredItems.Add(it);
         // Filter changed → visible set changed → header glyph may need to flip.
         RefreshSelectAllState();
+        // …and the visible/total object count shown in the toolbar.
+        NotifyCountsChanged();
     }
 
     // ─────────────────────────── Sorting ───────────────────────────
@@ -1419,24 +1445,28 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
                         var snapLabel = string.IsNullOrWhiteSpace(SourceSnapshotDisplayName)
                             ? "snapshot"
                             : SourceSnapshotDisplayName;
-                        return BatchPreviewViewModel.ForFileAndTargets(
+                        var snapVm = BatchPreviewViewModel.ForFileAndTargets(
                             svc:         _svc,
                             sourceLabel: $"Source · {SourceEnv} / {SourceDatabase} @ {snapLabel}",
                             fileContent: sourceSql!,
                             objectName:  item.Name.Trim(),
                             targets:     targetEndpoints);
+                        snapVm.AutoIgnoreWhitespaceForInSync = true;
+                        return snapVm;
                     }
                 }
             }
             // Snapshot mode but the object isn't in this snapshot — fall
             // through so the user at least sees the targets, with a
             // "not in snapshot" placeholder on the source side.
-            return BatchPreviewViewModel.ForFileAndTargets(
+            var missingVm = BatchPreviewViewModel.ForFileAndTargets(
                 svc:         _svc,
                 sourceLabel: $"Source · {SourceEnv} / {SourceDatabase} (snapshot)",
                 fileContent: $"-- '{item.Name}' is not present in the selected snapshot.",
                 objectName:  item.Name.Trim(),
                 targets:     targetEndpoints);
+            missingVm.AutoIgnoreWhitespaceForInSync = true;
+            return missingVm;
         }
 
         // Live source path (original behaviour).
@@ -1449,7 +1479,9 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
                 ConnectionString: srcConn)
         };
         endpoints.AddRange(targetEndpoints);
-        return new BatchPreviewViewModel(_svc, item.Name.Trim(), endpoints);
+        var liveVm = new BatchPreviewViewModel(_svc, item.Name.Trim(), endpoints);
+        liveVm.AutoIgnoreWhitespaceForInSync = true;
+        return liveVm;
     }
 
     /// <summary>
@@ -1594,14 +1626,14 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         // Spelled out in the message: rows × targets so the user sees the
         // real blast radius before saying yes.
         var targetCount = Targets.Count(t => t.IsChecked);
-        var rowsLabel    = work.Count   == 1 ? "row"    : "rows";
-        var targetsLabel = targetCount  == 1 ? "target" : "targets";
-        var scopeLine    = scopeLabel.StartsWith("filtered")
-            ? $"This will run {work.Count} filtered {rowsLabel} against {targetCount} {targetsLabel}."
-            : $"This will run {work.Count} selected {rowsLabel} against {targetCount} {targetsLabel}.";
+        var rowsLabel    = work.Count   == 1 ? "object"  : "objects";
+        var targetsLabel = targetCount  == 1 ? "target"  : "targets";
+        var scopeWord    = scopeLabel.StartsWith("filtered") ? "visible" : "selected";
+        var scopeLine    = $"Execute {work.Count} {scopeWord} {rowsLabel} on {targetCount} {targetsLabel}?";
         var ok = await ConfirmDialog.AskAsync(
-            title:       "Execute on targets?",
-            message:     $"{scopeLine} Each existing object will be ALTERED; missing objects will be CREATED. Continue?",
+            title:       "Execute batch?",
+            message:     $"{scopeLine}\n\nExisting objects will be altered and missing objects created on each target. "
+                       + "Each target is backed up first. This can't be undone automatically.",
             primaryText: "Execute",
             cancelText:  "Cancel");
         if (!ok) { Status = "Execute cancelled."; return; }
@@ -1937,6 +1969,12 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
             // rebuild so the visible list catches up to the new statuses.
             _suppressFilterRebuild = false;
             RebuildFilteredItems();
+            // The run just changed the targets, so the in-sync (✓) answers
+            // from before Execute are now stale — rows we just pushed should
+            // flip to in-sync. Kick a fresh check so the ticks (and the
+            // Hide in-sync filter) reflect reality without the user having to
+            // touch the source/target pickers to force a refresh.
+            QueueSyncCheckRefresh();
         }
     }
 

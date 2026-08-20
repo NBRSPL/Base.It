@@ -100,4 +100,53 @@ public class DefinitionHasherTests
         var twice = DefinitionHasher.Normalize(once);
         Assert.Equal(once, twice);
     }
+
+    [Fact]
+    public void Hash_ignores_tabs_vs_spaces_indentation()
+    {
+        // "Ignore tab and space": the same body indented with tabs vs
+        // spaces (and different amounts) must be in-sync.
+        var spaces = DefinitionHasher.Hash("CREATE PROC X AS\nBEGIN\n    SELECT 1\nEND");
+        var tabs   = DefinitionHasher.Hash("CREATE PROC X AS\nBEGIN\n\t\tSELECT 1\nEND");
+        Assert.Equal(spaces, tabs);
+    }
+
+    [Fact]
+    public void Hash_ignores_whitespace_between_tokens()
+    {
+        // Extra spaces / tabs around operators and commas are formatting.
+        var tight = DefinitionHasher.Hash("SELECT a,b FROM t WHERE x=1");
+        var loose = DefinitionHasher.Hash("SELECT a ,  b\tFROM  t\nWHERE x  =  1");
+        Assert.Equal(tight, loose);
+    }
+
+    [Fact]
+    public void Hash_ignores_comment_internal_whitespace()
+    {
+        // A comment's alignment / trailing spaces are formatting, not
+        // content — same words, different spacing → in-sync.
+        var a = DefinitionHasher.Hash("SELECT 1 -- keep in sync");
+        var b = DefinitionHasher.Hash("SELECT 1 --    keep   in   sync   ");
+        Assert.Equal(a, b);
+    }
+
+    [Fact]
+    public void Hash_treats_different_comment_text_as_different()
+    {
+        // Comment TEXT is content: a genuinely different comment is a real
+        // (if minor) difference and must NOT be hidden as in-sync.
+        Assert.NotEqual(
+            DefinitionHasher.Hash("SELECT 1 -- alpha"),
+            DefinitionHasher.Hash("SELECT 1 -- beta"));
+    }
+
+    [Fact]
+    public void Hash_preserves_quoted_identifier_content()
+    {
+        // A column literally named [My Col] is NOT the same object as one
+        // named [MyCol] — whitespace inside a quoted identifier is data.
+        Assert.NotEqual(
+            DefinitionHasher.Hash("SELECT [My Col] FROM t"),
+            DefinitionHasher.Hash("SELECT [MyCol] FROM t"));
+    }
 }
