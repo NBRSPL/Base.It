@@ -465,11 +465,28 @@
                             <!-- Visible/total object count — sits in the flexible
                                  spacer column so it trails the OK/Fail counters.
                                  Updates live as filters (incl. Hide in-sync) change. -->
-                            <TextBlock Grid.Column="5" VerticalAlignment="Center" Margin="14,0,0,0"
-                                       HorizontalAlignment="Left"
-                                       FontSize="11" Opacity="0.7"
-                                       Text="{Binding CountSummary}"
-                                       ToolTip.Tip="Objects currently visible after filters (Status, name, Hide in-sync), out of the total loaded."/>
+                            <StackPanel Grid.Column="5" Orientation="Horizontal" Spacing="10"
+                                        VerticalAlignment="Center" Margin="14,0,0,0"
+                                        HorizontalAlignment="Left">
+                                <TextBlock VerticalAlignment="Center"
+                                           FontSize="11" Opacity="0.7"
+                                           Text="{Binding CountSummary}"
+                                           ToolTip.Tip="Objects currently visible after filters (Status, name, Hide in-sync), out of the total loaded."/>
+                                <!-- Selected-count chip: how many rows are ticked. Reads
+                                     "M of N selected shown" when a filter hides some ticks,
+                                     so it's clear only the visible ticks run on Execute
+                                     Selected. Hidden entirely when nothing is ticked. -->
+                                <Border IsVisible="{Binding HasSelection}"
+                                        Background="Transparent"
+                                        BorderBrush="{DynamicResource App.AccentBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="4" Padding="7,1" VerticalAlignment="Center">
+                                    <TextBlock FontSize="11" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource App.AccentBrush}"
+                                               Text="{Binding SelectionSummary}"
+                                               ToolTip.Tip="Rows ticked with the checkboxes. Only visible ticked rows are run by Execute Selected — hidden ones are excluded."/>
+                                </Border>
+                            </StackPanel>
                             <Button Grid.Column="6" Padding="8,2" MinHeight="26"
                                     Content="Export CSV"
                                     Click="OnExportCsvClick"
@@ -493,7 +510,7 @@
                             Background="{DynamicResource App.ElevatedBgBrush}"
                             BorderBrush="{DynamicResource App.StrokeBrush}"
                             BorderThickness="0,0,0,1">
-                        <Grid ColumnDefinitions="44,50,*,100,40,2*" Margin="0,7">
+                        <Grid ColumnDefinitions="44,50,*,130,28,100,40,2*" Margin="0,7">
                             <!-- col 0: select-all toggle (same Button-styled-as-checkbox
                                  as the compare grid header in Snapshots). Clicking it
                                  ticks every visible row, or clears them if any are
@@ -536,7 +553,79 @@
                                     <TextBlock Text="{Binding NameSortIndicator}" FontSize="10" Opacity="0.7"/>
                                 </StackPanel>
                             </Button>
+                            <!-- col 3: Object type + funnel filter (same faceted-filter
+                                 pattern as the Snapshots grid). Ticking/unticking types
+                                 filters the grid; hidden rows are excluded from Execute. -->
                             <Button Grid.Column="3"
+                                    Background="Transparent" BorderThickness="0"
+                                    Padding="6,0,0,0"
+                                    HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                    ToolTip.Tip="Filter by object type (Table / View / Procedure / Function / …).">
+                                <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <TextBlock Text="Type" FontSize="11" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource App.TextSecondaryBrush}"/>
+                                    <TextBlock Text="&#xE71C;" FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                               FontSize="11" Opacity="0.6" VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <Button.Flyout>
+                                    <Flyout Placement="Bottom">
+                                        <StackPanel Spacing="2" MinWidth="180">
+                                            <TextBlock Text="Filter by object type" FontSize="11" Opacity="0.6" Margin="0,0,0,4"/>
+                                            <ItemsControl ItemsSource="{Binding TypeFilterValues}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="vm:DiffFilterValue">
+                                                        <CheckBox Content="{Binding Value}"
+                                                                  IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                                  Margin="0,2"/>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+                            <!-- col 4: sync-state column header — a funnel that opens a
+                                 flyout which is BOTH the legend and the filter, plus a
+                                 sort-by-state toggle. Aligns with the 28px badge column
+                                 in each row. The little ▲/▼ shows the active sort at a glance. -->
+                            <Button Grid.Column="4"
+                                    Background="Transparent" BorderThickness="0"
+                                    Padding="0" MinWidth="0"
+                                    HorizontalAlignment="Center" HorizontalContentAlignment="Center"
+                                    ToolTip.Tip="Sync state — what each symbol means, filter by state, and sort. Click for options.">
+                                <StackPanel Orientation="Horizontal" Spacing="1" VerticalAlignment="Center">
+                                    <TextBlock Text="&#xE71C;" FontFamily="Segoe Fluent Icons,Segoe MDL2 Assets"
+                                               FontSize="11" Opacity="0.6" VerticalAlignment="Center"/>
+                                    <TextBlock Text="{Binding SyncSortIndicator}" FontSize="9" Opacity="0.7"
+                                               VerticalAlignment="Center"/>
+                                </StackPanel>
+                                <Button.Flyout>
+                                    <Flyout Placement="Bottom">
+                                        <StackPanel Spacing="4" MinWidth="210">
+                                            <TextBlock Text="Sync state" FontSize="11" FontWeight="SemiBold" Opacity="0.8"/>
+                                            <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
+                                                    Padding="6,3" Background="Transparent"
+                                                    Command="{Binding ToggleSortCommand}" CommandParameter="Sync"
+                                                    ToolTip.Tip="Sort the grid by sync state so like groups with like. Click to cycle ascending → descending → off.">
+                                                <TextBlock Text="{Binding SyncSortMenuLabel}" FontSize="11"/>
+                                            </Button>
+                                            <Border Height="1" Background="{DynamicResource App.StrokeBrush}" Margin="0,2"/>
+                                            <TextBlock Text="Show only these states" FontSize="11" Opacity="0.6"/>
+                                            <!-- Each row is a legend entry (glyph + meaning) AND its filter tick. -->
+                                            <ItemsControl ItemsSource="{Binding StateFilterValues}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="vm:DiffFilterValue">
+                                                        <CheckBox Content="{Binding Value}"
+                                                                  IsChecked="{Binding IsIncluded, Mode=TwoWay}"
+                                                                  Margin="0,1"/>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+                            <Button Grid.Column="5"
                                     Background="Transparent" BorderThickness="0"
                                     Padding="6,0,0,0"
                                     HorizontalAlignment="Stretch" HorizontalContentAlignment="Left"
@@ -552,7 +641,7 @@
                                  in the same header row so the toggle lives on the
                                  table it filters (next to the ✓ in-sync column),
                                  not adrift in the toolbar above. -->
-                            <Grid Grid.Column="5" ColumnDefinitions="Auto,*,Auto">
+                            <Grid Grid.Column="7" ColumnDefinitions="Auto,*,Auto">
                                 <TextBlock Grid.Column="0" Text="Message" FontSize="11" FontWeight="SemiBold"
                                            VerticalAlignment="Center" Margin="6,0,0,0"
                                            Foreground="{DynamicResource App.TextSecondaryBrush}"/>
@@ -573,13 +662,13 @@
                             Background="{DynamicResource App.WindowBgBrush}"
                             BorderBrush="{DynamicResource App.StrokeBrush}"
                             BorderThickness="0,0,0,1">
-                        <Grid ColumnDefinitions="44,50,*,100,40,2*" Margin="0,4">
+                        <Grid ColumnDefinitions="44,50,*,130,28,100,40,2*" Margin="0,4">
                             <TextBlock Grid.Column="1" Text="＋"
                                        HorizontalAlignment="Center" VerticalAlignment="Center"
                                        FontSize="13" FontWeight="Bold"
                                        Foreground="{DynamicResource App.SuccessBrush}"
                                        ToolTip.Tip="Type a name + Enter to add. Paste a multi-line list to add many at once."/>
-                            <TextBox Grid.Column="2" Grid.ColumnSpan="4"
+                            <TextBox Grid.Column="2" Grid.ColumnSpan="6"
                                      x:Name="QuickAddBox"
                                      BorderThickness="0" Background="Transparent"
                                      Padding="6,2" MinHeight="26"
@@ -593,6 +682,7 @@
                     <!-- Items DataGrid: HeadersVisibility=None — we render the
                          header above. Eye column opens BatchPreviewWindow with
                          source + every ticked target's CREATE definition. -->
+                    <Panel>
                     <DataGrid x:Name="ItemsGrid" ItemsSource="{Binding FilteredItems}"
                               AutoGenerateColumns="False"
                               HeadersVisibility="None"
@@ -635,6 +725,9 @@
                             </DataGridTemplateColumn>
                             <DataGridTextColumn Header="#"           Binding="{Binding Index}"   Width="50"  IsReadOnly="True"/>
                             <DataGridTextColumn Header="Object name" Binding="{Binding Name}"    Width="*"/>
+                            <!-- Object type (Table / View / Procedure / …). Resolved by
+                                 the fast metadata pass; blank until it lands. Read-only. -->
+                            <DataGridTextColumn Header="Type" Binding="{Binding TypeLabel}" Width="130" IsReadOnly="True"/>
                             <!-- In-sync badge lives in its OWN column, not inside the
                                  Object-name cell, so the name column stays a real
                                  DataGridTextColumn — i.e. inline-editable as before.
@@ -645,13 +738,54 @@
                             <DataGridTemplateColumn Header="" Width="28" CanUserResize="False" CanUserSort="False" IsReadOnly="True">
                                 <DataGridTemplateColumn.CellTemplate>
                                     <DataTemplate DataType="vm:BatchItem">
-                                        <TextBlock Text="✓"
-                                                   Foreground="{DynamicResource App.InSyncBrush}"
-                                                   FontSize="13" FontWeight="Bold"
-                                                   HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center"
-                                                   IsVisible="{Binding ShowInSyncBadge}"
-                                                   ToolTip.Tip="{Binding SyncCheckHint}"/>
+                                        <!-- One badge per source→targets relationship. Only
+                                             one is visible at a time (driven by State); the
+                                             tooltip spells out the per-target breakdown.
+                                             Legend lives in the column-header funnel flyout. -->
+                                        <Panel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <!-- ✓ in sync with every target -->
+                                            <TextBlock Text="✓"
+                                                       Foreground="{DynamicResource App.StateInSyncBrush}"
+                                                       FontSize="13" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       IsVisible="{Binding ShowInSyncBadge}"
+                                                       ToolTip.Tip="{Binding SyncCheckHint}"/>
+                                            <!-- ＋ new: absent from every target, will be CREATED -->
+                                            <TextBlock Text="＋"
+                                                       Foreground="{DynamicResource App.StateNewBrush}"
+                                                       FontSize="13" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       IsVisible="{Binding ShowCreateBadge}"
+                                                       ToolTip.Tip="{Binding SyncCheckHint}"/>
+                                            <!-- ≠ out of sync: present but differs in every target, will be ALTERED -->
+                                            <TextBlock Text="≠"
+                                                       Foreground="{DynamicResource App.StateOutOfSyncBrush}"
+                                                       FontSize="13" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       IsVisible="{Binding ShowOutOfSyncBadge}"
+                                                       ToolTip.Tip="{Binding SyncCheckHint}"/>
+                                            <!-- ◐ partial/mixed across targets -->
+                                            <TextBlock Text="◐"
+                                                       Foreground="{DynamicResource App.StatePartialBrush}"
+                                                       FontSize="13" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       IsVisible="{Binding ShowPartialBadge}"
+                                                       ToolTip.Tip="{Binding SyncCheckHint}"/>
+                                            <!-- ⊘ not in source (exists in a target, nothing to push) -->
+                                            <TextBlock Text="⊘"
+                                                       Foreground="{DynamicResource App.StateAbsentBrush}"
+                                                       FontSize="13" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       IsVisible="{Binding ShowNotInSourceBadge}"
+                                                       ToolTip.Tip="{Binding SyncCheckHint}"/>
+                                            <!-- ✕ not found in source or any target -->
+                                            <TextBlock Text="✕"
+                                                       Foreground="{DynamicResource App.StateMissingBrush}"
+                                                       FontSize="13" FontWeight="Bold"
+                                                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                       IsVisible="{Binding ShowNotAnywhereBadge}"
+                                                       ToolTip.Tip="{Binding SyncCheckHint}"/>
+                                        </Panel>
                                     </DataTemplate>
                                 </DataGridTemplateColumn.CellTemplate>
                             </DataGridTemplateColumn>
@@ -695,6 +829,19 @@
                             </DataGridTemplateColumn>
                         </DataGrid.Columns>
                     </DataGrid>
+                        <!-- Textless loading line overlaid on the grid's top edge:
+                             shown only while a background sync/type pass runs, so the
+                             indicator sits ON the rows/badges it's resolving instead of
+                             adrift in the toolbar. One indeterminate bar — animates only
+                             while visible, no per-row spinners. -->
+                        <ProgressBar IsIndeterminate="True"
+                                     IsVisible="{Binding IsChecking}"
+                                     VerticalAlignment="Top" HorizontalAlignment="Stretch"
+                                     Height="3" MinHeight="3" MinWidth="0" Padding="0"
+                                     Background="Transparent"
+                                     Foreground="{DynamicResource App.AccentBrush}"
+                                     IsHitTestVisible="False"/>
+                    </Panel>
                 </DockPanel>
             </Border>
 

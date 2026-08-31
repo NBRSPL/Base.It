@@ -67,6 +67,23 @@ public sealed partial class ScriptsViewModel : ObservableObject, ICsvExportable
     /// <summary>Total .sql files in the list — shown in the items toolbar.</summary>
     public string FileCountSummary => $"{Items.Count} file{(Items.Count == 1 ? "" : "s")}";
 
+    /// <summary>Rows ticked with the checkbox (drives the "N selected" toolbar chip).</summary>
+    public int SelectedCount => Items.Count(i => i.IsSelected);
+
+    /// <summary>Shows the selected-count chip only when something is ticked.</summary>
+    public bool HasSelection => SelectedCount > 0;
+
+    /// <summary>Selected-count label for the toolbar ("N selected"). Scripts has no
+    /// row filter, so there's no hidden-selection case to disambiguate.</summary>
+    public string SelectionSummary => SelectedCount == 0 ? "" : $"{SelectedCount} selected";
+
+    private void NotifySelectionChanged()
+    {
+        OnPropertyChanged(nameof(SelectedCount));
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(SelectionSummary));
+    }
+
     /// <summary>Flat endpoint list (every visible connection) for the target picker.</summary>
     public ObservableCollection<EndpointPick> Endpoints { get; } = new();
 
@@ -98,8 +115,25 @@ public sealed partial class ScriptsViewModel : ObservableObject, ICsvExportable
     public ScriptsViewModel(AppServices svc)
     {
         _svc = svc;
-        Items.CollectionChanged += (_, _) => { Renumber(); OnPropertyChanged(nameof(FileCountSummary)); };
+        Items.CollectionChanged += OnItemsCollectionChanged;
         Reload();
+    }
+
+    private void OnItemsCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
+    {
+        Renumber();
+        OnPropertyChanged(nameof(FileCountSummary));
+        // Track per-row IsSelected so the "N selected" chip stays live.
+        if (e.NewItems is not null)
+            foreach (ScriptItem it in e.NewItems) it.PropertyChanged += OnScriptItemPropertyChanged;
+        if (e.OldItems is not null)
+            foreach (ScriptItem it in e.OldItems) it.PropertyChanged -= OnScriptItemPropertyChanged;
+        NotifySelectionChanged();
+    }
+
+    private void OnScriptItemPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ScriptItem.IsSelected)) NotifySelectionChanged();
     }
 
     /// <summary>Re-pull the target list from the active connection group.</summary>

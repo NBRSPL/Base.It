@@ -22,6 +22,10 @@ public static class WindowSizing
     public static void ClampToWorkingArea(Window window, double maxFraction = 0.9)
     {
         if (window is null) return;
+        // Only clamp a normal-state window. Setting Width/Height/Position on a
+        // Maximized (or FullScreen/Minimized) window silently reverts it to
+        // Normal — that's why the maximized preview was opening un-maximized.
+        if (window.WindowState != WindowState.Normal) return;
         var screen = window.Screens?.ScreenFromVisual(window)
                   ?? window.Screens?.Primary;
         if (screen is null) return;

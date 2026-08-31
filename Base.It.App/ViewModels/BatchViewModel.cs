@@ -15,6 +15,59 @@ namespace Base.It.App.ViewModels;
 public enum BatchStatus { Pending, Running, Success, Failed, Skipped }
 
 /// <summary>
+/// The relationship of one object between the SOURCE and the whole set of ticked
+/// TARGETS — every meaningful permutation, collapsed to a single badge (with the
+/// exact per-target breakdown in the row tooltip). Ordering also drives the
+/// "Sync" column sort: most-actionable first, settled/absent last.
+/// </summary>
+public enum BatchSyncState
+{
+    /// <summary>Not resolved yet (no source/targets picked, or the check is still running).</summary>
+    Unknown = 0,
+    /// <summary>Present in the source and present-and-differing in EVERY target → will ALTER all.</summary>
+    OutOfSync,
+    /// <summary>Present in the source, absent from EVERY target → will CREATE on all.</summary>
+    WillCreate,
+    /// <summary>A mix across targets — some in sync, some differ, some missing. Tooltip has the counts.</summary>
+    Partial,
+    /// <summary>Present and identical in the source and EVERY target → nothing to do.</summary>
+    InSync,
+    /// <summary>Missing from the source but present in one or more targets → nothing to push.</summary>
+    NotInSource,
+    /// <summary>Not found in the source OR any target — the name doesn't resolve anywhere.</summary>
+    NotAnywhere,
+}
+
+/// <summary>Glyphs + labels for <see cref="BatchSyncState"/>. The label carries the
+/// glyph too, so the column's filter flyout doubles as the legend. One place so the
+/// badge, the tooltip, and the filter all agree.</summary>
+internal static class BatchSyncStateDisplay
+{
+    public static string Glyph(BatchSyncState s) => s switch
+    {
+        BatchSyncState.InSync      => "✓",
+        BatchSyncState.WillCreate  => "＋",
+        BatchSyncState.OutOfSync   => "≠",
+        BatchSyncState.Partial     => "◐",
+        BatchSyncState.NotInSource => "⊘",
+        BatchSyncState.NotAnywhere => "✕",
+        _                          => "",
+    };
+
+    /// <summary>Legend/facet label — glyph + words (blank for Unknown so it isn't a filter facet).</summary>
+    public static string Label(BatchSyncState s) => s switch
+    {
+        BatchSyncState.InSync      => "✓  In sync",
+        BatchSyncState.WillCreate  => "＋  New (will create)",
+        BatchSyncState.OutOfSync   => "≠  Out of sync",
+        BatchSyncState.Partial     => "◐  Partial / mixed",
+        BatchSyncState.NotInSource => "⊘  Not in source",
+        BatchSyncState.NotAnywhere => "✕  Not found anywhere",
+        _                          => "",
+    };
+}
+
+/// <summary>
 /// Where Batch reads object SQL from at Execute time.
 /// <list type="bullet">
 ///   <item><b>Live</b> — fetches via the source endpoint's connection
@@ -61,6 +114,26 @@ public sealed record BatchSourceItem(
     public override string ToString() => Label;
 }
 
+/// <summary>Short, readable labels for <see cref="Base.It.Core.Models.SqlObjectType"/>
+/// used by the Batch Type column + its facet filter. One place so the column and
+/// the filter values always agree.</summary>
+internal static class SqlObjectTypeDisplay
+{
+    public static string Label(Base.It.Core.Models.SqlObjectType t) => t switch
+    {
+        Base.It.Core.Models.SqlObjectType.Table               => "Table",
+        Base.It.Core.Models.SqlObjectType.View                => "View",
+        Base.It.Core.Models.SqlObjectType.StoredProcedure     => "Procedure",
+        Base.It.Core.Models.SqlObjectType.ScalarFunction      => "Scalar function",
+        Base.It.Core.Models.SqlObjectType.InlineTableFunction => "Inline TVF",
+        Base.It.Core.Models.SqlObjectType.TableValuedFunction => "Table function",
+        Base.It.Core.Models.SqlObjectType.Trigger             => "Trigger",
+        Base.It.Core.Models.SqlObjectType.TableType           => "Table type",
+        Base.It.Core.Models.SqlObjectType.UserDefinedDataType => "UDDT",
+        _                                                     => "",
+    };
+}
+
 public sealed partial class BatchItem : ObservableObject
 {
     [ObservableProperty] private bool        _isSelected;
@@ -70,27 +143,78 @@ public sealed partial class BatchItem : ObservableObject
     [ObservableProperty] private string      _message = "";
 
     /// <summary>
-    /// Tri-state outcome of the background "already in sync?" check:
-    ///   <c>null</c> = unknown (not checked yet, no source/target picked, or fetch failed)
-    ///   <c>true</c>  = the source's hash matches every ticked target's hash
-    ///   <c>false</c> = at least one target differs
-    /// Drives the small ✓ glyph in the row template via
-    /// <see cref="ShowInSyncBadge"/>. Updated on the UI thread by
-    /// <see cref="BatchViewModel.RunSyncChecksAsync"/>.
+    /// The full source→targets relationship for this object (see
+    /// <see cref="BatchSyncState"/>). Single source of truth for the badge, the
+    /// column filter, the sort rank, and the derived <see cref="IsInSync"/> /
+    /// <see cref="WillCreate"/> shims below. Set by
+    /// <see cref="BatchViewModel.RunSyncChecksAsync"/> on the UI thread.
     /// </summary>
-    [ObservableProperty] private bool?       _isInSync;
-    [ObservableProperty] private string      _syncCheckHint = "";
+    [ObservableProperty] private BatchSyncState _state = BatchSyncState.Unknown;
+
+    /// <summary>Human-readable per-target breakdown, shown as the badge's tooltip
+    /// (e.g. "2 in sync · 1 differs · 1 will create").</summary>
+    [ObservableProperty] private string _syncCheckHint = "";
 
     /// <summary>
-    /// Avalonia's <c>IsVisible</c> binds a <c>bool</c>; the tri-state
-    /// <see cref="IsInSync"/> needs a plain-bool shim so the XAML
-    /// <c>IsVisible</c> binding handles null + false the same way
-    /// (invisible). Re-raised whenever IsInSync changes.
+    /// The object's catalog type (Table / View / Procedure / Function / …),
+    /// resolved by the fast metadata pass (one <c>ListAllAsync</c> query on the
+    /// source, not a per-object fetch) so it appears almost immediately after a
+    /// paste. Null until resolved (or if the source doesn't have the object).
     /// </summary>
-    public bool ShowInSyncBadge => IsInSync == true;
+    [ObservableProperty] private Base.It.Core.Models.SqlObjectType? _objectType;
 
-    partial void OnIsInSyncChanged(bool? value)
-        => OnPropertyChanged(nameof(ShowInSyncBadge));
+    /// <summary>Human label for <see cref="ObjectType"/> — drives the Type column
+    /// and its facet filter. Blank while unresolved.</summary>
+    public string TypeLabel => ObjectType is { } t ? SqlObjectTypeDisplay.Label(t) : "";
+
+    partial void OnObjectTypeChanged(Base.It.Core.Models.SqlObjectType? value)
+        => OnPropertyChanged(nameof(TypeLabel));
+
+    // ── State-derived display + back-compat shims ──────────────────────────
+    // Everything below is computed from State so there's one source of truth.
+    // IsInSync / WillCreate keep their old meaning so the Hide-in-sync filter and
+    // any other consumer don't need to change.
+
+    /// <summary>Tri-state kept for the Hide-in-sync filter: true only when fully in
+    /// sync, false for any actionable difference, null while unknown / not pushable.</summary>
+    public bool? IsInSync => State switch
+    {
+        BatchSyncState.InSync                                   => true,
+        BatchSyncState.Unknown or BatchSyncState.NotInSource
+            or BatchSyncState.NotAnywhere                       => (bool?)null,
+        _                                                       => false,
+    };
+
+    /// <summary>True when Execute will CREATE this on every target.</summary>
+    public bool WillCreate => State == BatchSyncState.WillCreate;
+
+    /// <summary>Glyph label for the column's facet filter + legend (blank while unknown).</summary>
+    public string StateLabel => BatchSyncStateDisplay.Label(State);
+
+    /// <summary>The single badge glyph shown in the state column.</summary>
+    public string StateGlyph => BatchSyncStateDisplay.Glyph(State);
+
+    // Per-state visibility shims — one glyph is themed + shown at a time in XAML.
+    public bool ShowInSyncBadge      => State == BatchSyncState.InSync;
+    public bool ShowCreateBadge      => State == BatchSyncState.WillCreate;
+    public bool ShowOutOfSyncBadge   => State == BatchSyncState.OutOfSync;
+    public bool ShowPartialBadge     => State == BatchSyncState.Partial;
+    public bool ShowNotInSourceBadge => State == BatchSyncState.NotInSource;
+    public bool ShowNotAnywhereBadge => State == BatchSyncState.NotAnywhere;
+
+    partial void OnStateChanged(BatchSyncState value)
+    {
+        OnPropertyChanged(nameof(IsInSync));
+        OnPropertyChanged(nameof(WillCreate));
+        OnPropertyChanged(nameof(StateLabel));
+        OnPropertyChanged(nameof(StateGlyph));
+        OnPropertyChanged(nameof(ShowInSyncBadge));
+        OnPropertyChanged(nameof(ShowCreateBadge));
+        OnPropertyChanged(nameof(ShowOutOfSyncBadge));
+        OnPropertyChanged(nameof(ShowPartialBadge));
+        OnPropertyChanged(nameof(ShowNotInSourceBadge));
+        OnPropertyChanged(nameof(ShowNotAnywhereBadge));
+    }
 
     public BatchItem(string name) { _name = name; }
 
@@ -197,6 +321,25 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
     public ObservableCollection<BatchItem>     Items           { get; } = new();
     public ObservableCollection<BatchItem>     FilteredItems   { get; } = new();
 
+    /// <summary>
+    /// Checkable object-type facets for the Type column's funnel filter (same
+    /// pattern as the Snapshots grid). Rebuilt as types resolve; every value
+    /// defaults to ticked so the first view shows everything. A row whose type
+    /// facet is unticked is hidden — and, like every other filter here, hidden
+    /// rows are excluded from Execute.
+    /// </summary>
+    public ObservableCollection<DiffFilterValue> TypeFilterValues { get; } = new();
+
+    /// <summary>
+    /// Checkable sync-state facets for the state column's funnel filter — one per
+    /// distinct <see cref="BatchSyncState"/> currently present (In sync ✓ / New ＋ /
+    /// Out of sync ≠ / Partial ◐ / Not in source ⊘ / Not anywhere ✕). Each value's
+    /// text carries its glyph, so the flyout doubles as the legend. Unticking a
+    /// state hides those rows — and, like every filter here, hidden rows are
+    /// excluded from Execute.
+    /// </summary>
+    public ObservableCollection<DiffFilterValue> StateFilterValues { get; } = new();
+
     /// <summary>Rows currently visible after the status / name / hide-in-sync filters.</summary>
     public int VisibleCount => FilteredItems.Count;
 
@@ -214,11 +357,45 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         ? $"{TotalObjectCount} object{(TotalObjectCount == 1 ? "" : "s")}"
         : $"{VisibleCount} of {TotalObjectCount} objects";
 
+    /// <summary>Rows ticked across the whole list (including any currently hidden by a filter).</summary>
+    public int SelectedCount => Items.Count(i => i.IsSelected);
+
+    /// <summary>Ticked AND currently visible — the exact set Execute Selected will run.</summary>
+    public int SelectedVisibleCount => FilteredItems.Count(i => i.IsSelected);
+
+    /// <summary>Drives the selected-count chip's visibility (shown only when something is ticked).</summary>
+    public bool HasSelection => SelectedCount > 0;
+
+    /// <summary>
+    /// Selected-count label for the toolbar. Reads "N selected" normally; when a
+    /// filter is hiding some ticked rows it reads "M of N selected shown" so it's
+    /// obvious the hidden ticks won't run — Execute Selected only touches the
+    /// visible ticked rows.
+    /// </summary>
+    public string SelectionSummary
+    {
+        get
+        {
+            var total = SelectedCount;
+            if (total == 0) return "";
+            var shown = SelectedVisibleCount;
+            return shown == total ? $"{total} selected" : $"{shown} of {total} selected shown";
+        }
+    }
+
     private void NotifyCountsChanged()
     {
         OnPropertyChanged(nameof(VisibleCount));
         OnPropertyChanged(nameof(TotalObjectCount));
         OnPropertyChanged(nameof(CountSummary));
+    }
+
+    private void NotifySelectionChanged()
+    {
+        OnPropertyChanged(nameof(SelectedCount));
+        OnPropertyChanged(nameof(SelectedVisibleCount));
+        OnPropertyChanged(nameof(HasSelection));
+        OnPropertyChanged(nameof(SelectionSummary));
     }
 
     public ObservableCollection<EndpointPick>     Endpoints       { get; } = new();
@@ -270,6 +447,10 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
 
     /// <summary>Re-entrancy guard for the SelectedSource ↔ SelectedSourceEndpoint pingpong.</summary>
     private bool _syncingSourceItem;
+
+    /// <summary>Generation counter so an off-thread source-candidate rebuild that
+    /// finishes late (superseded by a newer one) discards its stale result.</summary>
+    private int _sourceCandGen;
 
     /// <summary>
     /// Live mirror of every <see cref="TargetPickVm"/> with IsChecked=true.
@@ -416,6 +597,21 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
     private static readonly SemaphoreSlim _syncCheckGate = new(initialCount: 4, maxCount: 4);
 
     /// <summary>
+    /// True while a background sync/type pass is running (including its debounce
+    /// window). Drives a single, lightweight "Checking…" indicator so the blank
+    /// badges during re-analysis read as "working", not "nothing". Ref-counted
+    /// across overlapping/superseded passes so it flips on at the first and off
+    /// only after the last — no per-row spinners, no continuous animation when idle.
+    /// </summary>
+    [ObservableProperty] private bool _isChecking;
+
+    /// <summary>Count of in-flight check passes (0 ⇒ nothing running).</summary>
+    private int _activeChecks;
+
+    private async Task SetCheckingAsync(bool value)
+        => await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => IsChecking = value);
+
+    /// <summary>
     /// Debounce target. Called from collection / property changes that
     /// alter the inputs of the pre-check; cancels any running pass and
     /// kicks a new one off on a background task. No-op when there are
@@ -426,9 +622,42 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         _syncCheckCts?.Cancel();
         _syncCheckCts = new CancellationTokenSource();
         var ct = _syncCheckCts.Token;
-        // Run on a worker; the method itself awaits per-row tasks so
-        // we don't block the UI thread setting them up.
-        _ = Task.Run(() => RunSyncChecksAsync(ct), ct);
+
+        // Only show the "Checking…" indicator when a real query will happen
+        // (there's a source + at least one row). Computed here on the UI thread.
+        bool willQuery = Items.Count > 0
+                         && !string.IsNullOrWhiteSpace(SourceEnv)
+                         && !string.IsNullOrWhiteSpace(SourceDatabase);
+
+        // Debounce: a single source/target/paste interaction fires several
+        // property changes in a burst (dropdown cascades, target ticks, a
+        // multi-line paste). Without a short settle delay each one would cancel
+        // and restart a full catalog pass, hammering the DB and the dispatcher.
+        // Waiting ~200ms coalesces the burst into one pass; the CTS cancels the
+        // delay the moment the next change arrives.
+        _ = Task.Run(async () =>
+        {
+            // Ref-count the indicator: on at the first in-flight pass, off after
+            // the last, so overlapping/superseded passes don't flicker it.
+            bool counted = false;
+            if (willQuery)
+            {
+                counted = true;
+                if (System.Threading.Interlocked.Increment(ref _activeChecks) == 1)
+                    await SetCheckingAsync(true).ConfigureAwait(false);
+            }
+            try
+            {
+                try { await Task.Delay(200, ct).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                await RunSyncChecksAsync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (counted && System.Threading.Interlocked.Decrement(ref _activeChecks) == 0)
+                    await SetCheckingAsync(false).ConfigureAwait(false);
+            }
+        }, ct);
     }
 
     /// <summary>
@@ -468,106 +697,282 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         }
         catch (OperationCanceledException) { return; }
 
-        // No inputs → clear every row's badge so the UI doesn't show a
-        // ✓ left over from a previous pass.
-        if (string.IsNullOrEmpty(srcConn) || targetConns.Count == 0 || items.Length == 0)
+        // ── Phase 1a: source catalog (types + membership) in ONE lock-free
+        //    query, instead of a full-definition fetch per object. ──
+        Dictionary<string, SqlObjectType>? srcTypes = null;
+        if (!string.IsNullOrEmpty(srcConn))
         {
-            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            try
             {
-                foreach (var item in items) { item.IsInSync = null; item.SyncCheckHint = ""; }
-            });
+                var refs = await _svc.Scripter.ListAllAsync(srcConn!, ct).ConfigureAwait(false);
+                srcTypes = new Dictionary<string, SqlObjectType>(StringComparer.OrdinalIgnoreCase);
+                foreach (var r in refs) srcTypes[MetaKey(r.Id)] = r.Type;
+            }
+            catch (OperationCanceledException) { return; }
+            catch { srcTypes = null; }   // fall back to per-object fetch below
+        }
+
+        // Push types to the grid immediately — ONE UI hop for all rows — so the
+        // Type column + facet fill in without waiting on the content phase.
+        if (srcTypes is not null)
+        {
+            var typesLocal = srcTypes;
+            try
+            {
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    foreach (var it in items)
+                        it.ObjectType = TryMetaKey(it.Name, out var k) && typesLocal.TryGetValue(k, out var ty)
+                            ? ty : (SqlObjectType?)null;
+                    RebuildTypeFilterValues();
+                });
+            }
+            catch (OperationCanceledException) { return; }
+        }
+
+        // No source or no targets → can't compute create / in-sync. Reset those
+        // rows to Unknown (types stay when a source is present) and stop.
+        if (string.IsNullOrEmpty(srcConn) || targetConns.Count == 0)
+        {
+            try
+            {
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    foreach (var it in items) { it.State = BatchSyncState.Unknown; it.SyncCheckHint = ""; }
+                    if (string.IsNullOrEmpty(srcConn))
+                    {
+                        foreach (var it in items) it.ObjectType = null;
+                        RebuildTypeFilterValues();
+                    }
+                    RebuildStateFilterValues();
+                });
+            }
+            catch (OperationCanceledException) { }
             return;
         }
 
-        // Per-row check task. Each one awaits the shared gate so we cap
-        // concurrent SQL fetches; the gate is process-wide so two
-        // BatchViewModels can coexist without exploding the pool.
-        var tasks = items.Select(item => Task.Run(async () =>
+        // ── Phase 1b: target catalogs (membership) — one query each. ──
+        List<HashSet<string>>? targetKeys = null;
+        try
         {
-            await _syncCheckGate.WaitAsync(ct).ConfigureAwait(false);
+            var sets = await Task.WhenAll(targetConns.Select(async tc =>
+            {
+                var refs = await _svc.Scripter.ListAllAsync(tc, ct).ConfigureAwait(false);
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var r in refs) set.Add(MetaKey(r.Id));
+                return set;
+            })).ConfigureAwait(false);
+            targetKeys = sets.ToList();
+        }
+        catch (OperationCanceledException) { return; }
+        catch { targetKeys = null; }   // fall back to per-object fetch
+
+        bool fastPath = srcTypes is not null && targetKeys is not null
+                        && targetKeys.Count == targetConns.Count;
+
+        int T = targetConns.Count;
+
+        if (fastPath)
+        {
+            // Phase 1c: decide from membership alone everything that needs NO
+            // content read — source-missing (⊘ / ✕) and will-create-on-all (＋) —
+            // and apply it in ONE batched UI update. Rows present in the source AND
+            // at least one target still need a content compare (only those can be
+            // ✓ in sync, ≠ out of sync, or ◐ a match/differ mix), collected here
+            // together with WHICH targets they're present in (absent ones need no
+            // fetch — their count is already known).
+            var needContent = new List<(BatchItem Item, ObjectIdentifier Id, List<string> Present, int Absent)>();
+            var apply = new List<(BatchItem Item, BatchSyncState State, string Hint)>();
+
+            foreach (var item in items)
+            {
+                if (!TryParseId(item.Name, out var id, out var key)) continue;
+
+                var present = new List<string>();
+                for (int i = 0; i < T; i++)
+                    if (targetKeys![i].Contains(key)) present.Add(targetConns[i]);
+                int absent = T - present.Count;
+
+                if (!srcTypes!.ContainsKey(key))
+                    apply.Add((item,
+                        present.Count == 0 ? BatchSyncState.NotAnywhere : BatchSyncState.NotInSource,
+                        present.Count == 0
+                            ? "Not found in the source or any target"
+                            : $"Missing from the source (exists in {present.Count} of {T} target{(T == 1 ? "" : "s")}) — nothing to push"));
+                else if (absent == T)
+                    apply.Add((item, BatchSyncState.WillCreate,
+                        T == 1 ? "New — will be created on the target" : $"New — will be created on all {T} targets"));
+                else
+                    needContent.Add((item, id, present, absent));
+            }
+
             try
             {
-                ct.ThrowIfCancellationRequested();
-                if (string.IsNullOrWhiteSpace(item.Name)) return;
-
-                ObjectIdentifier id;
-                try { id = ObjectIdentifier.Parse(item.Name.Trim()); }
-                catch { return; }
-
-                var srcObj = await _svc.Scripter.GetObjectAsync(srcConn!, id, ct).ConfigureAwait(false);
-                if (srcObj is null)
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
                 {
-                    // Source doesn't have it → not strictly "in sync";
-                    // null badge keeps it clear that we have no answer.
-                    await SetInSyncAsync(item, isInSync: null, hint: "Source object not found").ConfigureAwait(false);
-                    return;
-                }
+                    foreach (var (item, state, hint) in apply) { item.State = state; item.SyncCheckHint = hint; }
+                });
+            }
+            catch (OperationCanceledException) { return; }
 
-                bool allMatch = true;
-                foreach (var tc in targetConns)
+            // Phase 2: content compare — only the PRESENT targets of the rows that
+            // need it. Concurrency-gated so a big batch doesn't fan out into
+            // hundreds of simultaneous reads.
+            var tasks = needContent.Select(p => Task.Run(async () =>
+            {
+                await _syncCheckGate.WaitAsync(ct).ConfigureAwait(false);
+                try
                 {
                     ct.ThrowIfCancellationRequested();
-                    var tObj = await _svc.Scripter.GetObjectAsync(tc, id, ct).ConfigureAwait(false);
-                    if (tObj is null || !string.Equals(tObj.Hash, srcObj.Hash, StringComparison.OrdinalIgnoreCase))
+                    var srcObj = await _svc.Scripter.GetObjectAsync(srcConn!, p.Id, ct).ConfigureAwait(false);
+                    if (srcObj is null)
+                    { await SetStateAsync(p.Item, BatchSyncState.NotInSource, "Source object not found").ConfigureAwait(false); return; }
+
+                    int match = 0, differ = 0;
+                    foreach (var tc in p.Present)
                     {
-                        allMatch = false;
-                        break;
+                        ct.ThrowIfCancellationRequested();
+                        var tObj = await _svc.Scripter.GetObjectAsync(tc, p.Id, ct).ConfigureAwait(false);
+                        if (tObj is null) differ++;   // vanished since the listing → treat as a diff
+                        else if (string.Equals(tObj.Hash, srcObj.Hash, StringComparison.OrdinalIgnoreCase)) match++;
+                        else differ++;
                     }
+                    var (state, hint) = Classify(match, differ, p.Absent, T);
+                    await SetStateAsync(p.Item, state, hint).ConfigureAwait(false);
                 }
+                catch (OperationCanceledException) { }
+                catch { }
+                finally { _syncCheckGate.Release(); }
+            }, ct)).ToArray();
 
-                await SetInSyncAsync(
-                    item,
-                    isInSync: allMatch,
-                    hint: allMatch
-                        ? targetConns.Count == 1 ? "In sync with target" : $"In sync with all {targetConns.Count} target(s)"
-                        : "Differs from at least one target")
-                .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { /* expected — pass was superseded */ }
-            catch
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
+        else
+        {
+            // Fallback (catalog listing unavailable — older server / transient
+            // error): the original per-object fetch, so correctness never
+            // regresses. Concurrency-gated + cancellable.
+            var tasks = items.Select(item => Task.Run(async () =>
             {
-                // Network / auth issues shouldn't crash a check pass;
-                // leave the row's IsInSync as-is so it appears unknown.
-            }
-            finally
-            {
-                _syncCheckGate.Release();
-            }
-        }, ct)).ToArray();
+                await _syncCheckGate.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (!TryParseId(item.Name, out var id, out _)) return;
 
-        try { await Task.WhenAll(tasks).ConfigureAwait(false); }
-        catch (OperationCanceledException) { /* superseded */ }
+                    var srcObj = await _svc.Scripter.GetObjectAsync(srcConn!, id, ct).ConfigureAwait(false);
+                    if (srcObj is null)
+                    {
+                        // Distinguish "not in source" from "not anywhere".
+                        int presentCount = 0;
+                        foreach (var tc in targetConns)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            if (await _svc.Scripter.GetObjectAsync(tc, id, ct).ConfigureAwait(false) is not null) presentCount++;
+                        }
+                        await SetStateAsync(item,
+                            presentCount == 0 ? BatchSyncState.NotAnywhere : BatchSyncState.NotInSource,
+                            presentCount == 0
+                                ? "Not found in the source or any target"
+                                : $"Missing from the source (exists in {presentCount} of {T} target{(T == 1 ? "" : "s")}) — nothing to push")
+                            .ConfigureAwait(false);
+                        return;
+                    }
+                    int match = 0, differ = 0, absent = 0;
+                    foreach (var tc in targetConns)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var tObj = await _svc.Scripter.GetObjectAsync(tc, id, ct).ConfigureAwait(false);
+                        if (tObj is null) absent++;
+                        else if (string.Equals(tObj.Hash, srcObj.Hash, StringComparison.OrdinalIgnoreCase)) match++;
+                        else differ++;
+                    }
+                    var (state, hint) = Classify(match, differ, absent, T);
+                    await SetStateAsync(item, state, hint).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { }
+                catch { }
+                finally { _syncCheckGate.Release(); }
+            }, ct)).ToArray();
 
-        // The pass just recomputed IsInSync for every row. If the
-        // "hide in-sync" filter is active, that changes which rows should
-        // be visible — rebuild the filtered view so newly-in-sync rows
-        // drop out (and no-longer-in-sync rows reappear).
-        if (HideInSync && !ct.IsCancellationRequested)
+            try { await Task.WhenAll(tasks).ConfigureAwait(false); }
+            catch (OperationCanceledException) { }
+        }
+
+        // Rebuild the Sync-state facet list to whatever states resolved, and — if
+        // Hide-in-sync is on, or the grid is sorted/filtered by Sync state — the
+        // filtered/sorted view too, so it reflects the new states.
+        if (!ct.IsCancellationRequested)
         {
             try
             {
-                await Avalonia.Threading.Dispatcher.UIThread
-                    .InvokeAsync(RebuildFilteredItems);
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+                {
+                    RebuildStateFilterValues();
+                    if (HideInSync || Sorter.ActiveKey == "Sync" || StateFilterValues.Any(v => !v.IsIncluded))
+                        RebuildFilteredItems();
+                });
             }
             catch (OperationCanceledException) { /* shutting down */ }
         }
     }
 
+    /// <summary>Collapse per-target tallies into a single <see cref="BatchSyncState"/>
+    /// plus a human breakdown for the tooltip. <paramref name="match"/> +
+    /// <paramref name="differ"/> + <paramref name="absent"/> == the target count.</summary>
+    private static (BatchSyncState State, string Hint) Classify(int match, int differ, int absent, int total)
+    {
+        if (absent == total)
+            return (BatchSyncState.WillCreate,
+                total == 1 ? "New — will be created on the target" : $"New — will be created on all {total} targets");
+        if (differ == 0 && absent == 0)
+            return (BatchSyncState.InSync,
+                total == 1 ? "In sync with the target" : $"In sync with all {total} targets");
+        if (match == 0 && absent == 0)
+            return (BatchSyncState.OutOfSync,
+                total == 1 ? "Differs from the target — will be altered" : $"Differs from all {total} targets — will be altered");
+
+        // Mixed across targets — spell out the split.
+        var parts = new List<string>(3);
+        if (match  > 0) parts.Add($"{match} in sync");
+        if (differ > 0) parts.Add($"{differ} differ");
+        if (absent > 0) parts.Add($"{absent} will create");
+        return (BatchSyncState.Partial, string.Join(" · ", parts));
+    }
+
     /// <summary>
-    /// Marshals an IsInSync / hint update onto the UI thread so
-    /// Avalonia bindings see the change from the dispatcher.
-    /// Fire-and-forget — the caller doesn't depend on the ordering of
-    /// row updates, only on each one eventually landing.
+    /// Marshals a State + hint update onto the UI thread so Avalonia bindings see
+    /// the change from the dispatcher. Fire-and-forget — the caller doesn't depend
+    /// on ordering, only on each update eventually landing.
     /// </summary>
-    private static Task SetInSyncAsync(BatchItem item, bool? isInSync, string hint)
+    private static Task SetStateAsync(BatchItem item, BatchSyncState state, string hint)
     {
         Avalonia.Threading.Dispatcher.UIThread.Post(() =>
         {
-            item.IsInSync      = isInSync;
+            item.State         = state;
             item.SyncCheckHint = hint;
         });
         return Task.CompletedTask;
     }
+
+    // Catalog key helpers — normalise (schema, name) so the source list, each
+    // target list, and every row's typed name all compare on one
+    // casing-insensitive key.
+    private static string MetaKey(ObjectIdentifier id) =>
+        $"{id.Schema.ToUpperInvariant()}|{id.Name.ToUpperInvariant()}";
+
+    private static bool TryParseId(string name, out ObjectIdentifier id, out string key)
+    {
+        id = default; key = "";
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        try { id = ObjectIdentifier.Parse(name.Trim()); } catch { return false; }
+        key = MetaKey(id);
+        return true;
+    }
+
+    private static bool TryMetaKey(string name, out string key)
+        => TryParseId(name, out _, out key);
 
     /// <summary>
     /// True while an execute / backup run is in progress. Used to suppress
@@ -623,6 +1028,8 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
             next = ticked == 0 ? false : ticked == total ? true : (bool?)null;
         }
         if (AllItemsChecked != next) AllItemsChecked = next;
+        // Selection or visible-set changed → refresh the "N selected" toolbar chip.
+        NotifySelectionChanged();
     }
 
     /// <summary>
@@ -655,12 +1062,30 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
             _          => null
         };
         var nameNeedle = (NameFilter ?? "").Trim();
+        // Object-type facet: the set of ticked type labels. A row is hidden only
+        // when its type is KNOWN and its facet is unticked — rows whose type
+        // hasn't resolved yet (blank label) stay visible, so nothing is silently
+        // dropped while the fast metadata pass is still running.
+        var allowedTypes = TypeFilterValues.Where(v => v.IsIncluded)
+                                           .Select(v => v.Value)
+                                           .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var allowedStates = StateFilterValues.Where(v => v.IsIncluded)
+                                             .Select(v => v.Value)
+                                             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var matched = new List<BatchItem>();
         foreach (var it in Items)
         {
             if (want is not null && it.Status != want) continue;
             if (nameNeedle.Length > 0 &&
                 !it.Name.Contains(nameNeedle, StringComparison.OrdinalIgnoreCase))
+                continue;
+            if (TypeFilterValues.Count > 0 && !string.IsNullOrEmpty(it.TypeLabel) &&
+                !allowedTypes.Contains(it.TypeLabel))
+                continue;
+            // Sync-state facet — same rule: hide only when the state is KNOWN
+            // (not Unknown) and its facet is unticked; unresolved rows stay.
+            if (StateFilterValues.Count > 0 && it.State != BatchSyncState.Unknown &&
+                !allowedStates.Contains(it.StateLabel))
                 continue;
             // Hide already-in-sync rows when the toggle is on. Only rows
             // KNOWN to be in sync (IsInSync == true) are hidden — rows that
@@ -677,6 +1102,75 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         NotifyCountsChanged();
     }
 
+    /// <summary>
+    /// Rebuild the distinct object-type facets shown in the Type column's funnel
+    /// filter, from whatever types have resolved so far. Preserves the user's
+    /// existing tick state across rebuilds (so resolving more types doesn't
+    /// silently re-include a type they'd unticked), and defaults newly-seen
+    /// types to ticked. Call on the UI thread.
+    /// </summary>
+    private void RebuildTypeFilterValues()
+    {
+        var present = Items.Select(i => i.TypeLabel)
+                           .Where(l => !string.IsNullOrEmpty(l))
+                           .Distinct(StringComparer.OrdinalIgnoreCase)
+                           .OrderBy(l => l, StringComparer.OrdinalIgnoreCase)
+                           .ToList();
+
+        // Remember prior tick state so a rebuild doesn't reset the user's choices.
+        var prior = TypeFilterValues.ToDictionary(v => v.Value, v => v.IsIncluded, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var v in TypeFilterValues) v.PropertyChanged -= OnTypeFilterValueChanged;
+        TypeFilterValues.Clear();
+        foreach (var label in present)
+        {
+            var v = new DiffFilterValue(label) { IsIncluded = !prior.TryGetValue(label, out var was) || was };
+            v.PropertyChanged += OnTypeFilterValueChanged;
+            TypeFilterValues.Add(v);
+        }
+    }
+
+    private void OnTypeFilterValueChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DiffFilterValue.IsIncluded)) RebuildFilteredItems();
+    }
+
+    /// <summary>
+    /// Rebuild the sync-state facets from whatever states have resolved, in a
+    /// fixed, meaningful order (most-actionable first). Preserves the user's
+    /// tick state across rebuilds; defaults newly-seen states to ticked. The
+    /// value text carries the glyph so the flyout is also the legend. Call on
+    /// the UI thread.
+    /// </summary>
+    private void RebuildStateFilterValues()
+    {
+        // Fixed display order, filtered to the states actually present.
+        var order = new[]
+        {
+            BatchSyncState.OutOfSync, BatchSyncState.WillCreate, BatchSyncState.Partial,
+            BatchSyncState.InSync, BatchSyncState.NotInSource, BatchSyncState.NotAnywhere,
+        };
+        var present = new HashSet<BatchSyncState>(Items.Select(i => i.State).Where(s => s != BatchSyncState.Unknown));
+
+        var prior = StateFilterValues.ToDictionary(v => v.Value, v => v.IsIncluded, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var v in StateFilterValues) v.PropertyChanged -= OnStateFilterValueChanged;
+        StateFilterValues.Clear();
+        foreach (var s in order)
+        {
+            if (!present.Contains(s)) continue;
+            var label = BatchSyncStateDisplay.Label(s);
+            var v = new DiffFilterValue(label) { IsIncluded = !prior.TryGetValue(label, out var was) || was };
+            v.PropertyChanged += OnStateFilterValueChanged;
+            StateFilterValues.Add(v);
+        }
+    }
+
+    private void OnStateFilterValueChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(DiffFilterValue.IsIncluded)) RebuildFilteredItems();
+    }
+
     // ─────────────────────────── Sorting ───────────────────────────
 
     private static readonly IReadOnlyDictionary<string, Func<BatchItem, object?>> SortSelectors =
@@ -684,10 +1178,34 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         {
             ["Name"]   = i => i.Name,
             ["Status"] = i => i.Status.ToString(),
+            // Sync state — clusters similar rows together so a whole group can be
+            // acted on at once. Rank puts the most-actionable first and the
+            // settled / absent rows last: out-of-sync → new → partial → in sync →
+            // not-in-source → not-anywhere → unknown. Ascending = that order; Desc flips it.
+            ["Sync"]   = i => i.State switch
+            {
+                BatchSyncState.OutOfSync   => 0,
+                BatchSyncState.WillCreate  => 1,
+                BatchSyncState.Partial     => 2,
+                BatchSyncState.InSync      => 3,
+                BatchSyncState.NotInSource => 4,
+                BatchSyncState.NotAnywhere => 5,
+                _                          => 6,
+            },
         };
 
     public string NameSortIndicator   => Sorter.Indicator("Name");
     public string StatusSortIndicator => Sorter.Indicator("Status");
+    public string SyncSortIndicator   => Sorter.Indicator("Sync");
+
+    /// <summary>Header glyph for the sync (✓/＋) column: the active ▲/▼ arrow when
+    /// it's the sort key, else a faint up-down hint (⇅) so it reads as sortable.</summary>
+    public string SyncSortGlyph =>
+        Sorter.Indicator("Sync") is { Length: > 0 } ind ? ind.Trim() : "⇅";
+
+    /// <summary>Label for the "Sort by state" entry inside the state-column flyout,
+    /// carrying the active ▲/▼ so the current direction is visible there.</summary>
+    public string SyncSortMenuLabel => $"Sort by state{Sorter.Indicator("Sync")}";
 
     /// <summary>Header click → cycle the column's sort and rebuild the visible (sorted) rows.</summary>
     [RelayCommand]
@@ -698,6 +1216,9 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         RebuildFilteredItems();
         OnPropertyChanged(nameof(NameSortIndicator));
         OnPropertyChanged(nameof(StatusSortIndicator));
+        OnPropertyChanged(nameof(SyncSortIndicator));
+        OnPropertyChanged(nameof(SyncSortGlyph));
+        OnPropertyChanged(nameof(SyncSortMenuLabel));
     }
 
     // ───────────────────────── CSV export ──────────────────────────
@@ -1050,34 +1571,52 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         // the list doesn't yank the picker back to default.
         var keepKey = SelectedSource?.Key;
 
-        SourceCandidates.Clear();
-        foreach (var ep in Endpoints)
-        {
-            if (!matchesTicked(ep))
-                SourceCandidates.Add(new BatchSourceItem(ep, Snapshot: null));
+        // Snapshot the inputs on the UI thread (Endpoints + ticked membership),
+        // then do the DISK work (open each endpoint's schema store + enumerate
+        // its snapshots — which touches the file system, 3× Directory.Create per
+        // store) off the UI thread. Doing it inline was a real "stick" on every
+        // source/target change, especially when %AppData% is on a synced/network
+        // drive. A generation counter discards a rebuild that a newer one
+        // superseded, so the picker never flickers to a stale list.
+        var eps = Endpoints.ToArray();
+        var tickedLive = new HashSet<string>(
+            eps.Where(matchesTicked).Select(e => e.Key), StringComparer.OrdinalIgnoreCase);
+        int gen = ++_sourceCandGen;
 
-            // Pull snapshots from the local store for this endpoint.
-            // Stores are lazy — opening one for an endpoint with no
-            // snapshots is cheap (just a Directory.Exists check).
-            try
-            {
-                var store = _svc.OpenSchemaStore(ep.Environment, ep.Database);
-                foreach (var snap in store.ListSnapshots())
-                    SourceCandidates.Add(new BatchSourceItem(ep, snap));
-            }
-            catch { /* store unreadable — skip, source picker should never blow up */ }
-        }
-
-        if (!string.IsNullOrEmpty(keepKey))
+        _ = Task.Run(() =>
         {
-            var match = SourceCandidates.FirstOrDefault(s => s.Key == keepKey);
-            if (match is not null && !ReferenceEquals(match, SelectedSource))
+            var built = new List<BatchSourceItem>(eps.Length);
+            foreach (var ep in eps)
             {
-                _syncingSourceItem = true;
-                try { SelectedSource = match; }
-                finally { _syncingSourceItem = false; }
+                if (!tickedLive.Contains(ep.Key))
+                    built.Add(new BatchSourceItem(ep, Snapshot: null));
+                try
+                {
+                    var store = _svc.OpenSchemaStore(ep.Environment, ep.Database);
+                    foreach (var snap in store.ListSnapshots())
+                        built.Add(new BatchSourceItem(ep, snap));
+                }
+                catch { /* store unreadable — skip, source picker should never blow up */ }
             }
-        }
+
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (gen != _sourceCandGen) return;   // a newer rebuild superseded this one
+                SourceCandidates.Clear();
+                foreach (var it in built) SourceCandidates.Add(it);
+
+                if (!string.IsNullOrEmpty(keepKey))
+                {
+                    var match = SourceCandidates.FirstOrDefault(s => s.Key == keepKey);
+                    if (match is not null && !ReferenceEquals(match, SelectedSource))
+                    {
+                        _syncingSourceItem = true;
+                        try { SelectedSource = match; }
+                        finally { _syncingSourceItem = false; }
+                    }
+                }
+            });
+        });
     }
 
     /// <summary>
@@ -1168,9 +1707,34 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
         OnPropertyChanged(nameof(IsSwapVisible));
         OnPropertyChanged(nameof(TargetSelectedCount));
         OnPropertyChanged(nameof(TargetTotalCount));
-        // Target selection changed → in-sync answers from any previous
-        // pass are stale (they were measured against a different set).
+        // The target set (or the source, which rebuilds targets) just changed, so
+        // every row's sync state was measured against a DIFFERENT set and is now
+        // stale. Clear the badges immediately — a wrong ✓/≠/◐ lingering during the
+        // re-check window is worse than a blank — then re-run the check.
+        InvalidateSyncStates();
         QueueSyncCheckRefresh();
+    }
+
+    /// <summary>
+    /// Wipe every row's sync state back to Unknown (clears the badge + tooltip)
+    /// so no stale symbol shows while a fresh check runs. Types are left as-is
+    /// (the fast pass refreshes them, and clearing would just flicker the column).
+    /// Re-shows anything the state filter / Hide-in-sync had hidden, since it's
+    /// all "unknown" again until the pass resolves it. UI thread.
+    /// </summary>
+    private void InvalidateSyncStates()
+    {
+        bool any = false;
+        foreach (var it in Items)
+        {
+            if (it.State != BatchSyncState.Unknown || it.SyncCheckHint.Length > 0)
+            {
+                it.State = BatchSyncState.Unknown;
+                it.SyncCheckHint = "";
+                any = true;
+            }
+        }
+        if (any) RebuildFilteredItems();
     }
 
     [RelayCommand]
@@ -1601,10 +2165,27 @@ public sealed partial class BatchViewModel : ObservableObject, ICsvExportable
     /// with the row checkboxes and run just that.
     /// </summary>
     [RelayCommand]
-    private Task ExecuteSelectedAsync() => ExecuteCoreAsync(
-        Items.Where(i => i.IsSelected).ToList(),
-        emptyMsg: "Tick rows first",
-        scopeLabel: "selected rows");
+    private Task ExecuteSelectedAsync()
+    {
+        // Selected AND visible: a row ticked but then hidden by a filter
+        // (Status / name / Hide in-sync) is excluded — hidden rows are never
+        // executed, the same "run only what you can see" rule Execute follows.
+        // This is why selection and filter must intersect: the checkbox picks
+        // rows, the filter scopes them, and Execute Selected runs the overlap.
+        var visibleSelected = FilteredItems.Where(i => i.IsSelected).ToList();
+        if (visibleSelected.Count == 0 && Items.Any(i => i.IsSelected))
+        {
+            // Ticks exist but the filter hides every one — say so precisely
+            // instead of the generic "tick rows first".
+            Status = "All ticked rows are hidden by the current filter — nothing to run.";
+            _svc.Toasts.Warning("Selection hidden",
+                "Every ticked row is filtered out. Clear the filter or tick a visible row.");
+            return Task.CompletedTask;
+        }
+        return ExecuteCoreAsync(visibleSelected,
+            emptyMsg: "Tick rows first",
+            scopeLabel: "selected rows");
+    }
 
     private async Task ExecuteCoreAsync(List<BatchItem> work, string emptyMsg, string scopeLabel)
     {

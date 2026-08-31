@@ -15,7 +15,6 @@ namespace Base.It.App.Views;
 public partial class BatchPreviewWindow : Window
 {
     private BatchPreviewViewModel? _vm;
-    private string _findText = "";
 
     public BatchPreviewWindow()
     {
@@ -25,82 +24,22 @@ public partial class BatchPreviewWindow : Window
         Opened += async (_, _) => { if (_vm is not null) await _vm.LoadAsync(); };
         Closed += (_, _) => Unbind();
 
-        // Window-wide keystrokes:
-        //   Ctrl+F          → open find overlay
-        //   F3              → next change
-        //   Shift+F3        → previous change
-        // Mirrors IDE diff conventions so muscle memory works here.
-        // Esc closes the find overlay via OnFindBoxKeyDown.
+        // Ctrl+F opens the standard find bar (AvaloniaEdit's SearchPanel:
+        // find next / previous / highlight-all + match count) on the focused
+        // side. F3 / Shift+F3 for find-next/prev are handled by that panel
+        // itself once it's open. Change navigation is on the ▲ / ▼ buttons.
         AddHandler(KeyDownEvent, OnGlobalKeyDown,
             Avalonia.Interactivity.RoutingStrategies.Bubble | Avalonia.Interactivity.RoutingStrategies.Tunnel);
-    }
-
-    /// <summary>Open the find overlay and seed it with the previous query so re-opening picks up where the user left off.</summary>
-    private void OpenFindOverlay()
-    {
-        var ov  = this.FindControl<Border>("FindOverlay");
-        var box = this.FindControl<TextBox>("FindBox");
-        if (ov is null || box is null) return;
-        ov.IsVisible = true;
-        box.Text     = _findText;
-        box.Focus();
-        if (box.Text is { Length: > 0 } t) box.CaretIndex = t.Length;
-    }
-
-    private void HideFindOverlay()
-    {
-        var ov = this.FindControl<Border>("FindOverlay");
-        if (ov is not null) ov.IsVisible = false;
-        if (_findText.Length > 0)
-        {
-            _findText = "";
-            ApplyFindToPanes(_findText);
-        }
     }
 
     private void OnGlobalKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control))
         {
-            OpenFindOverlay();
-            e.Handled = true;
-            return;
-        }
-        // F3 family — only fire when the find textbox doesn't have
-        // focus so the user can still type 'F3' into a search if they
-        // ever needed to. The find overlay's own KeyDown handles Esc.
-        if (e.Key == Key.F3 && _vm is not null)
-        {
-            if (e.KeyModifiers.HasFlag(KeyModifiers.Shift)) _vm.PrevChangeCommand.Execute(null);
-            else                                            _vm.NextChangeCommand.Execute(null);
+            var host = this.FindControl<PaneDiffView>("PaneHost");
+            host?.OpenFind();
             e.Handled = true;
         }
-    }
-
-    private void OnFindBoxKeyDown(object? sender, KeyEventArgs e)
-    {
-        if (e.Key == Key.Escape)
-        {
-            HideFindOverlay();
-            e.Handled = true;
-        }
-    }
-
-    private void OnFindBoxTextChanged(object? sender, TextChangedEventArgs e)
-    {
-        if (sender is not TextBox tb) return;
-        var next = tb.Text ?? "";
-        if (next == _findText) return;
-        _findText = next;
-        ApplyFindToPanes(_findText);
-    }
-
-    private void OnFindClose(object? sender, RoutedEventArgs e) => HideFindOverlay();
-
-    private void ApplyFindToPanes(string text)
-    {
-        var host = this.FindControl<PaneDiffView>("PaneHost");
-        host?.SetFindText(text);
     }
 
     private void Bind()

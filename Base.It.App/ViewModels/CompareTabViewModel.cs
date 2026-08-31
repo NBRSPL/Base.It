@@ -129,12 +129,34 @@ public sealed partial class CompareTabViewModel : ObservableObject, ICsvExportab
         var expandedLabel = ExpandedPane?.Label;
         Panes.Clear();
 
-        var all = defs.Select(d => d.Definition).ToList();
-        foreach (var d in defs)
+        // Two environments → the git-quality pair aligner (patience anchoring
+        // + similarity pairing + char-level segments) so the common
+        // "compare two objects" case gets precise, VS-Code-style highlights.
+        // Three or more → N-way membership marking (no single pair to
+        // char-diff against), same as before.
+        if (defs.Count == 2)
         {
-            var peers = all.Where(x => !ReferenceEquals(x, d.Definition));
-            var lines = LineAligner.Align(d.Definition, peers, IgnoreWhitespace);
-            Panes.Add(new EnvPane(d.Label, d.Color, d.Definition, lines));
+            var (aLines, bLines) = LineAligner.AlignPair(defs[0].Definition, defs[1].Definition, IgnoreWhitespace);
+            Panes.Add(new EnvPane(defs[0].Label, defs[0].Color, defs[0].Definition, aLines));
+            Panes.Add(new EnvPane(defs[1].Label, defs[1].Color, defs[1].Definition, bLines));
+        }
+        else
+        {
+            // N-way (3+): render is base-relative (pane 0 = base), so the per-column
+            // badges are too — a block that exists in only one environment is a real
+            // change even when the base is unchanged.
+            var all = defs.Select(d => d.Definition).ToList();
+            var badges = MultiDiffStats.Compute(all, IgnoreWhitespace);
+            for (int i = 0; i < defs.Count; i++)
+            {
+                var d = defs[i];
+                var peers = all.Where(x => !ReferenceEquals(x, d.Definition));
+                var lines = LineAligner.Align(d.Definition, peers, IgnoreWhitespace);
+                Panes.Add(new EnvPane(d.Label, d.Color, d.Definition, lines)
+                {
+                    DiffBadge = i < badges.Count ? badges[i] : null,
+                });
+            }
         }
 
         // Preserve an active expand-to-one-pane selection across a re-align.

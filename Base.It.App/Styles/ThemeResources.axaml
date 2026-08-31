@@ -89,6 +89,17 @@
             <Color x:Key="App.DiffAddBgColor">#6622C55E</Color>
             <Color x:Key="App.DiffAddFgColor">#FFFFFF</Color>
             <Color x:Key="App.DiffAddGutterColor">#22C55E</Color>
+            <!-- Two-level side-by-side diff palette (GitHub-style): the whole
+                 changed line gets a faint wash (…Line), the actual changed
+                 words a stronger wash (…Word) on top. Translucent so they sit
+                 naturally over the dark code background; text keeps its normal
+                 foreground for readability. Filler = the blank row shown on the
+                 side that has no counterpart line. -->
+            <Color x:Key="App.DiffDelLineColor">#26F85149</Color>
+            <Color x:Key="App.DiffDelWordColor">#59F85149</Color>
+            <Color x:Key="App.DiffAddLineColor">#263FB950</Color>
+            <Color x:Key="App.DiffAddWordColor">#593FB950</Color>
+            <Color x:Key="App.DiffFillerColor">#0D808080</Color>
             <!-- Subtle whitespace-change marker — slightly lifted off the
                  background so the eye sees the change without it
                  competing with the actual edit highlight beside it. -->
@@ -152,10 +163,30 @@
             <SolidColorBrush x:Key="App.DiffAddBgBrush" Color="{StaticResource App.DiffAddBgColor}"/>
             <SolidColorBrush x:Key="App.DiffAddFgBrush" Color="{StaticResource App.DiffAddFgColor}"/>
             <SolidColorBrush x:Key="App.DiffAddGutterBrush" Color="{StaticResource App.DiffAddGutterColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelLineBrush" Color="{StaticResource App.DiffDelLineColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelWordBrush" Color="{StaticResource App.DiffDelWordColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddLineBrush" Color="{StaticResource App.DiffAddLineColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddWordBrush" Color="{StaticResource App.DiffAddWordColor}"/>
+            <SolidColorBrush x:Key="App.DiffFillerBrush" Color="{StaticResource App.DiffFillerColor}"/>
             <SolidColorBrush x:Key="App.DiffWhitespaceBrush" Color="{StaticResource App.DiffWhitespaceColor}"/>
             <SolidColorBrush x:Key="App.FindMatchBgBrush" Color="{StaticResource App.FindMatchBgColor}"/>
             <SolidColorBrush x:Key="App.FindMatchFgBrush" Color="{StaticResource App.FindMatchFgColor}"/>
             <SolidColorBrush x:Key="App.InSyncBrush" Color="{StaticResource App.InSyncColor}"/>
+
+            <!-- Sync-state badges (Batch grid). Severity-based, DISTINCT hues so a
+                 small glyph never relies on shape alone:
+                   ✓ in sync    = green  (success, nothing to do)
+                   ＋ new        = blue   (additive / informational)
+                   ≠ out of sync = red    (critical: overwrites an existing object)
+                   ◐ partial     = amber  (caution: mixed across targets)
+                   ⊘ not in src  = grey   (neutral no-op)
+                   ✕ not anywhere= violet (anomaly: name resolves nowhere) -->
+            <SolidColorBrush x:Key="App.StateInSyncBrush"    Color="{StaticResource App.SuccessColor}"/>
+            <SolidColorBrush x:Key="App.StateNewBrush"       Color="{StaticResource App.InfoColor}"/>
+            <SolidColorBrush x:Key="App.StateOutOfSyncBrush" Color="{StaticResource App.ErrorColor}"/>
+            <SolidColorBrush x:Key="App.StatePartialBrush"   Color="{StaticResource App.WarningColor}"/>
+            <SolidColorBrush x:Key="App.StateAbsentBrush"    Color="{StaticResource App.TextMutedColor}"/>
+            <SolidColorBrush x:Key="App.StateMissingBrush"   Color="#C084FC"/>
 
             <!-- Override FluentAvalonia tokens so existing bindings pick up the sharper palette -->
             <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>
@@ -259,6 +290,14 @@
             <Color x:Key="App.DiffAddBgColor">#6622C55E</Color>
             <Color x:Key="App.DiffAddFgColor">#14532D</Color>
             <Color x:Key="App.DiffAddGutterColor">#22C55E</Color>
+            <!-- Two-level side-by-side diff palette (GitHub light): faint line
+                 wash + stronger word wash, opaque so it reads cleanly on the
+                 white code background; text keeps its normal dark foreground. -->
+            <Color x:Key="App.DiffDelLineColor">#FFEBE9</Color>
+            <Color x:Key="App.DiffDelWordColor">#FFC0BC</Color>
+            <Color x:Key="App.DiffAddLineColor">#E6FFEC</Color>
+            <Color x:Key="App.DiffAddWordColor">#ABF2BC</Color>
+            <Color x:Key="App.DiffFillerColor">#0A000000</Color>
             <Color x:Key="App.DiffWhitespaceColor">#F0F0EA</Color>
             <Color x:Key="App.FindMatchBgColor">#FFE5A3</Color>
             <Color x:Key="App.FindMatchFgColor">#3B2A00</Color>
@@ -316,10 +355,25 @@
             <SolidColorBrush x:Key="App.DiffAddBgBrush" Color="{StaticResource App.DiffAddBgColor}"/>
             <SolidColorBrush x:Key="App.DiffAddFgBrush" Color="{StaticResource App.DiffAddFgColor}"/>
             <SolidColorBrush x:Key="App.DiffAddGutterBrush" Color="{StaticResource App.DiffAddGutterColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelLineBrush" Color="{StaticResource App.DiffDelLineColor}"/>
+            <SolidColorBrush x:Key="App.DiffDelWordBrush" Color="{StaticResource App.DiffDelWordColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddLineBrush" Color="{StaticResource App.DiffAddLineColor}"/>
+            <SolidColorBrush x:Key="App.DiffAddWordBrush" Color="{StaticResource App.DiffAddWordColor}"/>
+            <SolidColorBrush x:Key="App.DiffFillerBrush" Color="{StaticResource App.DiffFillerColor}"/>
             <SolidColorBrush x:Key="App.DiffWhitespaceBrush" Color="{StaticResource App.DiffWhitespaceColor}"/>
             <SolidColorBrush x:Key="App.FindMatchBgBrush" Color="{StaticResource App.FindMatchBgColor}"/>
             <SolidColorBrush x:Key="App.FindMatchFgBrush" Color="{StaticResource App.FindMatchFgColor}"/>
             <SolidColorBrush x:Key="App.InSyncBrush" Color="{StaticResource App.InSyncColor}"/>
+
+            <!-- Sync-state badges (Batch grid) — severity-based, distinct hues.
+                 See the dark theme block above for the full legend. Violet is
+                 deepened here for contrast against the light card background. -->
+            <SolidColorBrush x:Key="App.StateInSyncBrush"    Color="{StaticResource App.SuccessColor}"/>
+            <SolidColorBrush x:Key="App.StateNewBrush"       Color="{StaticResource App.InfoColor}"/>
+            <SolidColorBrush x:Key="App.StateOutOfSyncBrush" Color="{StaticResource App.ErrorColor}"/>
+            <SolidColorBrush x:Key="App.StatePartialBrush"   Color="{StaticResource App.WarningColor}"/>
+            <SolidColorBrush x:Key="App.StateAbsentBrush"    Color="{StaticResource App.TextMutedColor}"/>
+            <SolidColorBrush x:Key="App.StateMissingBrush"   Color="#7C3AED"/>
 
             <!-- Override FluentAvalonia tokens -->
             <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="{StaticResource App.CardBgColor}"/>

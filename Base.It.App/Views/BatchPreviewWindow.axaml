@@ -8,6 +8,7 @@
         Width="1100" Height="680"
         MinWidth="640" MinHeight="380"
         WindowStartupLocation="CenterOwner"
+        WindowState="Maximized"
         Background="{DynamicResource App.WindowBgBrush}">
 
     <Panel>
@@ -33,36 +34,5 @@
             <Button Content="Close" MinWidth="80" Click="OnClose" Classes="accent"/>
         </StackPanel>
     </Grid>
-
-    <!-- Universal find overlay — same shape MainWindow uses so the
-         feature feels identical from any window. Ctrl+F opens it,
-         Esc / ✕ closes. Match highlighting is done by re-populating the
-         pane inlines whenever the text changes. -->
-    <Border x:Name="FindOverlay"
-            IsVisible="False"
-            HorizontalAlignment="Right" VerticalAlignment="Top"
-            Margin="0,12,16,0"
-            Padding="10,6"
-            Background="{DynamicResource App.ElevatedBgBrush}"
-            BorderBrush="{DynamicResource App.StrokeStrongBrush}"
-            BorderThickness="1"
-            CornerRadius="8"
-            BoxShadow="0 6 20 0 #40000000">
-        <Grid ColumnDefinitions="Auto,Auto,Auto" VerticalAlignment="Center">
-            <TextBlock Grid.Column="0" Text="Find" FontSize="11" Opacity="0.7"
-                       VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <TextBox Grid.Column="1" x:Name="FindBox"
-                     Width="240" MinHeight="26"
-                     Watermark="Type to filter the current page"
-                     KeyDown="OnFindBoxKeyDown"
-                     TextChanged="OnFindBoxTextChanged"/>
-            <Button  Grid.Column="2" Margin="6,0,0,0"
-                     Padding="6,2" MinWidth="0" MinHeight="26"
-                     Click="OnFindClose"
-                     ToolTip.Tip="Close (Esc)">
-                <TextBlock Text="✕" FontSize="11"/>
-            </Button>
-        </Grid>
-    </Border>
     </Panel>
 </Window>

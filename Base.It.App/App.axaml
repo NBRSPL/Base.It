@@ -15,5 +15,8 @@
     <Application.Styles>
         <sty:FluentAvaloniaTheme PreferSystemTheme="False" PreferUserAccentColor="False"/>
         <StyleInclude Source="avares://Base.It.App/Styles/PageStyles.axaml"/>
+        <!-- AvaloniaEdit control theme — required for the SQL code editor
+             (diff viewer canvas) to render its text area, gutter, etc. -->
+        <StyleInclude Source="avares://AvaloniaEdit/Themes/Fluent/AvaloniaEdit.xaml"/>
     </Application.Styles>
 </Application>

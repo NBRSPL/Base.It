@@ -345,12 +345,20 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
                 }
                 else
                 {
+                    // N-way (3+): render is base-relative (pane 0 = base), so the
+                    // per-column badges must be too — a block that exists in only
+                    // one target is a real change even though the base is unchanged.
                     var all = defs.Select(d => d.Definition).ToList();
-                    foreach (var d in defs)
+                    var badges = MultiDiffStats.Compute(all, IgnoreWhitespace);
+                    for (int i = 0; i < defs.Count; i++)
                     {
+                        var d = defs[i];
                         var peers = all.Where(x => !ReferenceEquals(x, d.Definition));
                         Panes.Add(new EnvPane(d.Label, d.Color, d.Definition,
-                            LineAligner.Align(d.Definition, peers, IgnoreWhitespace)));
+                            LineAligner.Align(d.Definition, peers, IgnoreWhitespace))
+                        {
+                            DiffBadge = i < badges.Count ? badges[i] : null,
+                        });
                     }
                 }
             }
@@ -374,11 +382,26 @@ public sealed partial class BatchPreviewViewModel : ObservableObject
                 ? _fetchFailureBlock
                 : LoadError + "\n\n" + _fetchFailureBlock;
 
-        var changes = Panes.FirstOrDefault()?.Lines
-            .Count(l => l.State == LineState.Different) ?? 0;
-        Status = changes == 0
-            ? "No changes."
-            : changes == 1 ? "1 change" : $"{changes} changes";
+        if (Panes.Count >= 3)
+        {
+            // N-way: the change lives in whichever target differs from the base,
+            // NOT necessarily in the base pane — so count differing environments
+            // from the per-column badges (which are base-relative), not the base
+            // pane's own changed-line count (that would read "No changes" whenever
+            // the base itself is untouched).
+            int differing = Panes.Skip(1).Count(p => p.DiffBadge?.Differs == true);
+            Status = differing == 0
+                ? "No changes."
+                : differing == 1 ? "1 environment differs." : $"{differing} environments differ.";
+        }
+        else
+        {
+            var changes = Panes.FirstOrDefault()?.Lines
+                .Count(l => l.State == LineState.Different) ?? 0;
+            Status = changes == 0
+                ? "No changes."
+                : changes == 1 ? "1 change" : $"{changes} changes";
+        }
         RebuildChangeIndex();
     }
 

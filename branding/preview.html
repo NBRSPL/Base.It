@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Base.It icons — stable vs beta</title>
+<style>
+  :root{color-scheme:dark light}
+  body{margin:0;padding:32px;background:#0d1017;color:#e7ecf6;font-family:'Inter',Segoe UI,Arial,sans-serif}
+  h1{font-size:18px;margin:0 0 4px}
+  p.sub{opacity:.6;margin:0 0 24px;font-size:13px}
+  .card{border:1px solid rgba(255,255,255,.14);border-radius:14px;padding:20px 22px;margin-bottom:20px;background:rgba(255,255,255,.03)}
+  .title{font-size:14px;font-weight:700;margin-bottom:14px;letter-spacing:.3px}
+  .row{display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap}
+  .cell{display:flex;flex-direction:column;align-items:center;gap:6px}
+  .cell img{image-rendering:auto;display:block}
+  .cap{font-size:11px;opacity:.5}
+  .tb{display:flex;align-items:center;gap:12px;background:#1b1b1f;border:1px solid rgba(255,255,255,.12);border-radius:10px;padding:10px 16px;width:max-content}
+  .tb .stub{width:28px;height:28px;border-radius:6px}
+  .tb .lbl{display:flex;flex-direction:column;align-items:center;gap:5px}
+  .tb .lbl span{font-size:10px;opacity:.6}
+  .sep{width:1px;height:32px;background:rgba(255,255,255,.14);margin:0 4px}
+  @media (prefers-color-scheme:light){body{background:#f4f5f8;color:#0b1020}.card{background:#fff;border-color:rgba(0,0,0,.1)}.tb{background:#e6e7ea}}
+</style>
+</head>
+<body>
+  <h1>Base.It app icons</h1>
+  <p class="sub">stable vs beta — shown at real pixel sizes. The beta build gets its own identity so both can be installed side by side.</p>
+
+  <div class="card">
+    <div class="title">Base.It — stable</div>
+    <div class="row">
+      <div class="cell"><img src="icon-256.png" width="128" height="128" alt=""><div class="cap">128</div></div>
+      <div class="cell"><img src="icon-64.png" width="64" height="64" alt=""><div class="cap">64</div></div>
+      <div class="cell"><img src="icon-48.png" width="48" height="48" alt=""><div class="cap">48</div></div>
+      <div class="cell"><img src="icon-32.png" width="32" height="32" alt=""><div class="cap">32</div></div>
+      <div class="cell"><img src="icon-16.png" width="16" height="16" alt=""><div class="cap">16</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="title">Base.It (Beta) — warm palette + BETA bar</div>
+    <div class="row">
+      <div class="cell"><img src="icon-beta-256.png" width="128" height="128" alt=""><div class="cap">128</div></div>
+      <div class="cell"><img src="icon-beta-64.png" width="64" height="64" alt=""><div class="cap">64</div></div>
+      <div class="cell"><img src="icon-beta-48.png" width="48" height="48" alt=""><div class="cap">48</div></div>
+      <div class="cell"><img src="icon-beta-32.png" width="32" height="32" alt=""><div class="cap">32</div></div>
+      <div class="cell"><img src="icon-beta-16.png" width="16" height="16" alt=""><div class="cap">16</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="title">Side by side on a taskbar</div>
+    <div class="tb">
+      <div class="stub" style="background:#2b6cb0"></div>
+      <div class="stub" style="background:#38a169"></div>
+      <div class="sep"></div>
+      <div class="lbl"><img src="icon-32.png" width="28" height="28" alt=""><span>Base.It</span></div>
+      <div class="lbl"><img src="icon-beta-32.png" width="28" height="28" alt=""><span>Base.It Beta</span></div>
+    </div>
+  </div>
+</body>
+</html>
